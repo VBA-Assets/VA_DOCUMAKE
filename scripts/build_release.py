@@ -21,8 +21,10 @@ release_*\\・dist\\ は、ビルドの生成物として git に入れない。
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import zipfile
@@ -39,6 +41,13 @@ def _source_files() -> list[str]:
     out = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True).stdout
     files = [f for f in out.decode("utf-8").split("\0") if f]
     return [f for f in files if not any(p.search(f) for p in _EXCLUDE)]
+
+
+def _clear_readonly(func, path, exc):
+    """OneDrive はフォルダに読み取り専用の属性を付け、Windows は読み取り専用のフォルダを消せない
+    （2026-10-25、作り直しで release_VerNNN が半分消えたまま止まった）。属性を外して、もう一度消す。"""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
 
 def build(version: str) -> Path:
@@ -58,7 +67,7 @@ def build(version: str) -> Path:
 
     stage = ROOT / f"release_{version}" / f"VA_DocuMake_{version}"
     if stage.exists():
-        shutil.rmtree(stage)
+        shutil.rmtree(stage, onexc=_clear_readonly)
     (stage / "マニュアル").mkdir(parents=True)
     shutil.copy2(exe, stage / exe.name)
     shutil.copy2(manual, stage / "マニュアル" / manual.name)
