@@ -1,4 +1,4 @@
-"""左インデント（{イン:2}。VA公用文の「行間詰め」と同じく、インデントの自動調節の対象外。2026-10-24 班長指示）。"""
+"""左インデント（+2 。VA公用文の「行間詰め」と同じく、インデントの自動調節の対象外。2026-10-24 班長指示）。"""
 from va_documake.doctypes import DOC_TYPES
 from va_documake.document import HEADING, parse
 from va_documake.layout import Typesetter
@@ -17,8 +17,8 @@ def lines_of(src):
 
 
 def test_left_indent_in_full_width_chars():
-    paras, x = lines_of(["# 見出し", "本文。", "{イン:3}" + LONG, "{イン:2}{字下}" + LONG, "{字下}{イン：０}" + LONG,
-                         "{インデント:4}長い形も読む。", "{イン}数字を省くと1字。", "次の本文。"])
+    paras, x = lines_of(["# 見出し", "本文。", "+3 " + LONG, "+2 -> " + LONG, "-> +０ " + LONG,
+                         "+4 長い形も読む。", "+1 数字を省くと1字。", "次の本文。"])
     assert [p.left_indent for p in paras] == [None, None, 3, 2, 0, 4, 1, None]
     assert x[2][0] == 3 and all(v == 3 for v in x[2][1:])          # 2行目からも同じ位置
     assert x[3][0] == 3 and all(v == 2 for v in x[3][1:])          # 字下げと一緒：1行目だけ1字下げ
@@ -28,8 +28,8 @@ def test_left_indent_in_full_width_chars():
 
 
 def test_indent_paragraph_is_not_converted():
-    """{イン:N} の段落は見出し・箇条書き・段落番号にしない。{字下} と一緒でも、後の段落の変換は止めない。"""
-    paras = parse(["# 第一", "{イン:1}{字下}# 見出しにしない", "{イン:1}- 箇条にしない", "**{イン:2}1. 番号にしない**",
+    """+N の段落は見出し・箇条書き・段落番号にしない。-> と一緒でも、後の段落の変換は止めない。"""
+    paras = parse(["# 第一", "+1 -> # 見出しにしない", "+1 - 箇条にしない", "**+2 1. 番号にしない**",
                    "# 第二"], DT)
     assert [p.kind for p in paras] == [HEADING, "body", "body", "body", HEADING]
     assert paras[1].text == "# 見出しにしない" and paras[3].text == "1. 番号にしない" and paras[3].left_indent == 2

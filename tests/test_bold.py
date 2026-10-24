@@ -61,7 +61,7 @@ def test_pdf_without_bold_has_no_gothic():
 
 def test_toc_entries_are_not_bold():
     ts = Typesetter(DT)
-    paras = parse(["{目次}", "{改ページ}", "# **重要な**見出し"], DT)
+    paras = parse(["[TOC]", "<<<", "# **重要な**見出し"], DT)
     assert paras[0].kind == TOC
     toc = [ln for ln in ts.layout(paras) if ln.para_index == 0]
     assert "".join(g.ch for g in toc[0].glyphs if not g.is_number) == "第１ 重要な見出し"
@@ -95,12 +95,12 @@ def test_number_is_bold_when_whole_text_is_bold():
     assert not any(number_bold(2))
 
 def test_bold_around_every_mark():
-    """配置の記号・{字下}・その行だけの記号・セルの配置の記号も、太字の記号で囲んだままで記号として読む
-    （「**{表題}準備書面（１）**」など。2026-10-24 班長指示）。"""
+    """配置の記号・-> ・その行だけの記号・セルの配置の記号も、太字の記号で囲んだままで記号として読む
+    （「**:=: 準備書面（１）**」など。2026-10-24 班長指示）。"""
     from va_documake.document import CENTER, PAGE_BREAK, RIGHT, TITLE
-    paras = parse(["**{表題}準備書面（１）**", "**{中央}中央の行**", "**{字下}字下げの段落**", "**{改ページ}**",
-                   "**{目次:2}**", "# 見出し", "| 項目 | 金額 |", "|---|---|", "| 休業損害 | **{右}1,000** |",
-                   "**{右}以上**", "**# 右揃えの後は見出しにしない**"], DT)
+    paras = parse(["**:=: 準備書面（１）**", "**:-: 中央の行**", "**-> 字下げの段落**", "**<<<**",
+                   "**[TOC:2]**", "# 見出し", "| 項目 | 金額 |", "|---|---|", "| 休業損害 | **--: 1,000** |",
+                   "**--: 以上**", "**# 右揃えの後は見出しにしない**"], DT)
     title, center, indent, brk, toc, _, table, right, after = paras
     assert (title.align, title.text, len(title.bold)) == (TITLE, "準備書面（１）", 7)
     assert (center.align, center.text, len(center.bold)) == (CENTER, "中央の行", 4)
@@ -110,4 +110,4 @@ def test_bold_around_every_mark():
     assert (right.align, right.text) == (RIGHT, "以上")
     assert after.kind == "body" and after.text == "# 右揃えの後は見出しにしない"
     # 本文の1字目は、元の行の記号の後の字に対応する
-    assert title.source_col(0) == len("**{表題}")
+    assert title.source_col(0) == len("**:=: ")

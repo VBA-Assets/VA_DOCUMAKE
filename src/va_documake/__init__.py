@@ -3,5 +3,5 @@
 仕様は、作業フォルダの `仕様.md`。
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 APP_NAME = "VA DocuMake"

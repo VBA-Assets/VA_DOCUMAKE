@@ -21,7 +21,7 @@ def test_count_chars_like_va_naiyou():
 def test_normal_document_passes():
     """1行19字・26行の格子で組むので、ふつうの文章（句読点のぶら下げで20字の行を含む）は通る。"""
     body = "通知人は、被通知人に対し、次のとおり通知します。" * 30
-    assert check(["{表題}通知書", "# 請求", body, "{右}以上"]) is None
+    assert check([":=: 通知書", "# 請求", body, "--: 以上"]) is None
 
 
 def test_too_many_chars_in_a_line():

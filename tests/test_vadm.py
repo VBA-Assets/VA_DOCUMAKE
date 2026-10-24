@@ -26,14 +26,14 @@ def test_doc_id():
 
 def test_build_and_read_back(tmp_path):
     settings = vadm.Settings("Keiyaku1", PAGE_NUMBER_TOP_RIGHT)
-    text = vadm.build("K7Q29XMD", 3, settings, "{表題}契約書\n# 目的\n〔人名Ａ〕は、\n\n")
+    text = vadm.build("K7Q29XMD", 3, settings, ":=: 契約書\n# 目的\n〔人名Ａ〕は、\n\n")
     sep = "==== VA DocuMake 文書ID K7Q29XMD 版 3 種類 契約書1（法令型） ページ番号 右上 行番号 なし ===="
     assert sep in text.splitlines()
     path = tmp_path / "K7Q29XMD.vadm"
     vadm.write_file(path, text)
     c = vadm.read_file(path)
     assert (c.doc_id, c.version, c.settings) == ("K7Q29XMD", 3, settings)
-    assert c.body == ["{表題}契約書", "# 目的", "〔人名Ａ〕は、"]
+    assert c.body == [":=: 契約書", "# 目的", "〔人名Ａ〕は、"]
     assert c.prompt is not None
     assert list(tmp_path.iterdir()) == [path]   # 一時ファイルが残らない
     # 行番号（2026-10-24）。行番号の書いていない区切りの行（それより前の構文ファイル）は「なし」
@@ -47,7 +47,7 @@ def test_old_separator_without_settings():
     c = vadm.read_file(TRIAL / "K7Q29XMD.vadm")
     assert (c.doc_id, c.version, c.settings) == ("K7Q29XMD", 1, None)
     assert c.body[0].startswith("令和８年（ワ）第〔番号Ａ〕号")
-    assert c.body[-1] == "{右}以上"
+    assert c.body[-1] == "--: 以上"
 
 
 @pytest.mark.parametrize("n", [1, 2, 3])
@@ -55,7 +55,7 @@ def test_trial_answers(n):
     c = vadm.read_file(TRIAL / f"回答_{n}.txt")
     assert (c.doc_id, c.version) == ("K7Q29XMD", 1)
     assert c.prompt is None
-    assert c.body[-1] == "{右}以上"
+    assert c.body[-1] == "--: 以上"
 
 
 def test_answer_with_preface_and_code_block():
@@ -81,7 +81,7 @@ def make_dictionary():
     return d
 
 
-CURRENT = ["{表題}準備書面", "{右}令和８年９月１７日", "# 認否", "〔人名Ａ〕の主張は争う。", "{改ページ}", "〔法人Ａ〕は認める。"]
+CURRENT = [":=: 準備書面", "--: 令和８年９月１７日", "# 認否", "〔人名Ａ〕の主張は争う。", "<<<", "〔法人Ａ〕は認める。"]
 
 
 def answer(body, version=3, doc_id="K7Q29XMD"):
@@ -99,15 +99,15 @@ def test_review_other_document_stops():
 
 
 def test_review_reports_tokens_marks_changes_and_old_version():
-    body = ["準備書面", "{右}令和８年９月１７日", "# 認否", "〔人名A〕の主張は争う。〔人名Ｃ〕も同じ。", "{改ページ}", "追加した段落。"]
+    body = ["準備書面", "--: 令和８年９月１７日", "# 認否", "〔人名A〕の主張は争う。〔人名Ｃ〕も同じ。", "<<<", "追加した段落。"]
     r = vadm.review(answer(body, version=1), "K7Q29XMD", 3, CURRENT, make_dictionary())
     assert r.older
     assert r.unknown_tokens == ["〔人名Ｃ〕"]
     assert r.lost_tokens == ["〔法人Ａ〕"]          # 〔人名A〕（半角）は消えたことにしない
-    assert r.lost_marks == [("{表題}", "{表題}準備書面")]
+    assert r.lost_marks == [(":=:", ":=: 準備書面")]
     changed_old = [ln for _, old, _ in r.changes for ln in old]
     changed_new = [ln for _, _, new in r.changes for ln in new]
-    assert "{表題}準備書面" in changed_old and "〔法人Ａ〕は認める。" in changed_old
+    assert ":=: 準備書面" in changed_old and "〔法人Ａ〕は認める。" in changed_old
     assert "追加した段落。" in changed_new
     assert "# 認否" not in changed_old    # 変わっていない行は出さない
     # 変わった・増えた行は、回答の文書の何行目か（エディターで印を付けるため）
@@ -151,9 +151,9 @@ def test_rebuild_same_version(tmp_path, sample):
 
 
 def test_rebuild_with_table_and_top_right_page_number(tmp_path):
-    real = ["{表題}損害の一覧", "# 損害", "甲野太郎の損害は、次の表のとおりである。",
-            "| 項目 | {右}金額 |", "|===|---:|", "| 甲野太郎の休業損害 | 1,080,000 |", "| 乙山商事株式会社の負担分 | 500,000 |",
-            "表のとおり、甲野太郎の損害は乙山商事株式会社が負う。", "{改ページ}", "{右}以上"]
+    real = [":=: 損害の一覧", "# 損害", "甲野太郎の損害は、次の表のとおりである。",
+            "| 項目 | --: 金額 |", "|===|---:|", "| 甲野太郎の休業損害 | 1,080,000 |", "| 乙山商事株式会社の負担分 | 500,000 |",
+            "表のとおり、甲野太郎の損害は乙山商事株式会社が負う。", "<<<", "--: 以上"]
     original, pdf, content = save_pair(tmp_path, real, page_number=PAGE_NUMBER_TOP_RIGHT)
     d, r = rebuild_dictionary(content, pdf)
     assert r.exact
@@ -205,10 +205,10 @@ def test_prompt_allows_table_changes_on_request():
     assert "2行目のすべての列の - を = にする" in vadm.PROMPT
 
 
-@pytest.mark.parametrize("mark", ["{目次}", "{目次:1}"])
+@pytest.mark.parametrize("mark", ["[TOC]", "[TOC:1]"])
 def test_rebuild_with_toc(tmp_path, mark):
     """目次（見出しが2回、PDF に出る）があっても、突き合わせで記号の元の語が求まる。"""
-    real = ["{表題}準備書面", mark, "{改ページ}", "# 甲野太郎の主張について", "甲野太郎は、乙山商事株式会社と契約した。",
+    real = [":=: 準備書面", mark, "<<<", "# 甲野太郎の主張について", "甲野太郎は、乙山商事株式会社と契約した。",
             "## 乙山商事株式会社の反論", "反論する。"]
     original, pdf, content = save_pair(tmp_path, real)
     d, r = rebuild_dictionary(content, pdf)
@@ -240,26 +240,51 @@ def test_rebuild_with_highlight(tmp_path):
 
 def test_prompt_explains_highlight():
     assert "==語== は私が画面で付けた目印（蛍光ペン。PDF には出ない）" in vadm.PROMPT
-    assert "蛍光ペンの記号（==語==）と均等割付の記号（{均等:5}語{均等}）は、私が求めたときを除き、付け外ししない" in vadm.PROMPT
+    assert "蛍光ペンの記号（==語==）と均等割付の記号（[語]{5}）は、私が求めたときを除き、付け外ししない" in vadm.PROMPT
 
 
 def test_review_reports_lost_indent_but_not_changed_count():
-    """AI の回答で {イン:N} が消えたら知らせる。字数を変えただけなら知らせない。"""
-    current = ["# 認否", "{イン:2}{字下}主張は争う。"]
-    r = vadm.review(answer(["# 認否", "{イン:3}{字下}主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
+    """AI の回答で +N が消えたら知らせる。字数を変えただけなら知らせない。"""
+    current = ["# 認否", "+2 -> 主張は争う。"]
+    r = vadm.review(answer(["# 認否", "+3 -> 主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
     assert not r.lost_marks
-    r = vadm.review(answer(["# 認否", "{字下}主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
-    assert [m for m, _ in r.lost_marks] == ["{イン}"]
-    assert "{イン:2} は段落の左インデントを全角2字にする記号" in vadm.PROMPT
+    r = vadm.review(answer(["# 認否", "-> 主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
+    assert [m for m, _ in r.lost_marks] == ["+N"]
+    assert "「+2 」は段落の左インデントを全角2字にする記号" in vadm.PROMPT
 
 
 def test_rebuild_with_distribute(tmp_path):
     """均等割付の記号は PDF に出ないが、突き合わせで記号の元の語が求まる（割り付けた中の記号も）。"""
-    real = ["{均等:5}原告{均等}甲野太郎", "{均等:6}{右}被告{均等}乙山商事株式会社", "# 認否", "{均等:8}甲野太郎{均等}の主張は争う。"]
+    real = ["[原告]{5}甲野太郎", "--: [被告]{6}乙山商事株式会社", "# 認否", "[甲野太郎]{8}の主張は争う。"]
     original, pdf, content = save_pair(tmp_path, real)
     d, r = rebuild_dictionary(content, pdf)
     assert r.exact and not r.missing
     assert d.restore(content.body_text)[0] == "\n".join(real)
+
+
+@pytest.mark.parametrize("real", [
+    # 割り付けた記号と、続く記号が隣り合う（PDF の字の並びは「原告甲野太郎」で、切れ目が字の並びに残らない）
+    ["[原告]{5}甲野太郎"],
+    # 行の終わりの記号と、次の行の割り付けた記号も隣り合う
+    ["[原告]{5}甲野太郎", "[乙山商事株式会社]{10}被告", "# 認否"],
+    # 割り付けた記号の前に記号がある（範囲の終わりから始めを求める）
+    ["甲野太郎[原告]{5}"],
+    # 表のセルの中
+    ["| 当事者 | 主張 |", "|---|---|", "| [原告]{5}甲野太郎 | 否認 |"],
+])
+def test_rebuild_with_distribute_next_to_token(tmp_path, real):
+    """均等割付の範囲の境目は、PDF の字の位置（1字目の左端から字数の幅）で求まる（2026-10-25 に見つかった不具合）。"""
+    original, pdf, content = save_pair(tmp_path, real)
+    d, r = rebuild_dictionary(content, pdf)
+    assert r.exact and not r.missing and not r.conflicts
+    assert d.restore(content.body_text)[0] == "\n".join(real)
+
+
+def test_rebuild_with_distribute_not_spread(tmp_path):
+    """字数より字が多く、割り付けずに字の幅のまま並んだときは、境目を字の位置から決めない（誤った語を採らない）。"""
+    original, pdf, content = save_pair(tmp_path, ["[原告]{1}甲野太郎"])
+    d, r = rebuild_dictionary(content, pdf)
+    assert not r.exact and set(r.missing) == {"〔その他Ａ〕", "〔人名Ａ〕"} and not r.found
 
 
 def test_rebuild_with_dots(tmp_path):
@@ -272,9 +297,20 @@ def test_rebuild_with_dots(tmp_path):
 
 def test_rebuild_with_composite_heading(tmp_path):
     """複合見出し（番号が続けて並ぶ）と目次があっても、突き合わせで記号の元の語が求まる。"""
-    real = ["{目次}", "{改ページ}", "#", "## 甲野太郎の主張", "本文。", "#", "## 乙山商事株式会社の反論", "反論する。"]
+    real = ["[TOC]", "<<<", "#", "## 甲野太郎の主張", "本文。", "#", "## 乙山商事株式会社の反論", "反論する。"]
     original, pdf, content = save_pair(tmp_path, real)
     d, r = rebuild_dictionary(content, pdf)
     assert r.exact and not r.missing
     assert d.restore(content.body_text)[0] == "\n".join(real)
 
+
+def test_ai_marker_lines_are_dropped():
+    """AI の画面が回答に混ぜた内部の目印の行（2026-10-25 の往復試験で claude.ai が混ぜた「<?thinking_complete?>」）は、
+    読み込むときに除き、除いた行を返す（2026-10-25 班長決定）。本文の中の <?…?> や、字のある行は除かない。"""
+    c = answer(["--: 以上", "<?thinking_complete?>", "  <?x-y.z?>  ", "<<<=", "本文に<?thinking_complete?>と書いた",
+                "<?thinking_complete?> 字のある行"])
+    assert c.body == ["--: 以上", "<<<=", "本文に<?thinking_complete?>と書いた", "<?thinking_complete?> 字のある行"]
+    assert c.dropped == ["<?thinking_complete?>", "<?x-y.z?>"]
+    r = vadm.review(c, "K7Q29XMD", 3, ["--: 以上", "<<<=", "本文に<?thinking_complete?>と書いた",
+                                       "<?thinking_complete?> 字のある行"], make_dictionary())
+    assert not r.changes and not r.changed_lines

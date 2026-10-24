@@ -1,4 +1,4 @@
-"""目次（{目次}）を、VA公用文で整えた文書に Word の「自動作成の目次 1」を入れたものと比べる（2026-10-24）。
+"""目次（[TOC]）を、VA公用文で整えた文書に Word の「自動作成の目次 1」を入れたものと比べる（2026-10-24）。
 
 正解は、試作\\Make-VaKouyoubunPdf.ps1 -Toc で、別の Word から読み取った（tests\\data\\目次）。
 Word の目次には題の行（「内容」）と、目次の後の空の行2つが入るので、見本にも同じ行を入れて比べる
@@ -80,7 +80,7 @@ def wrapped_entry(texts):
 def test_toc_lists_headings_up_to_level_3_with_page_numbers():
     dt = DOC_TYPES["Saiban"]
     ts = Typesetter(dt)
-    paras = parse(["{目次}", "{改ページ}", "# 第一", "## 小", "### 細", "#### 載せない", "{改ページ}", "# 第二"], dt)
+    paras = parse(["[TOC]", "<<<", "# 第一", "## 小", "### 細", "#### 載せない", "<<<", "# 第二"], dt)
     lines = ts.layout(paras)
     toc = [ln for ln in lines if ln.para_index == 0]
     texts = ["".join(g.ch for g in ln.glyphs if not g.is_number) for ln in toc]
@@ -99,7 +99,7 @@ def test_toc_wrapped_line_hangs_one_char():
     dt = DOC_TYPES["Saiban"]
     ts = Typesetter(dt)
     long = "長い見出し" * 12
-    paras = parse(["{目次}", "# 第一", "### " + long], dt)
+    paras = parse(["[TOC]", "# 第一", "### " + long], dt)
     lines = ts.layout(paras)
     toc = [ln for ln in lines if ln.para_index == 0]
     first, second = toc[1], toc[2]          # (1) の段の項目の1行目と2行目
@@ -150,19 +150,19 @@ def test_toc_leader_matches_va_kouyoubun_pdf():
     assert worst <= 0.25, worst
 
 def test_toc_levels_can_be_given_in_the_mark():
-    """{目次:2} のように段を書き添えると、その段までを載せる（2026-10-24 班長指示。全角のコロン・数字も読む）。"""
+    """[TOC:2] のように段を書き添えると、その段までを載せる（2026-10-24 班長指示。全角のコロン・数字も読む）。"""
     dt = DOC_TYPES["Saiban"]
     ts = Typesetter(dt)
-    body = ["{改ページ}", "# 第一", "## 小", "### 細", "#### 四段", "##### 五段"]
+    body = ["<<<", "# 第一", "## 小", "### 細", "#### 四段", "##### 五段"]
 
     def toc_texts(mark):
         paras = parse([mark] + body, dt)
         assert paras[0].kind == TOC
         return ["".join(g.ch for g in ln.glyphs if not g.is_number) for ln in ts.layout(paras) if ln.para_index == 0]
-    assert toc_texts("{目次}") == ["第１ 第一", "１ 小", "(1) 細"]
-    assert toc_texts("{目次:1}") == ["第１ 第一"]
-    assert toc_texts("{目次：２}") == ["第１ 第一", "１ 小"]
-    assert toc_texts("{目次:4}") == ["第１ 第一", "１ 小", "(1) 細", "ア 四段"]
+    assert toc_texts("[TOC]") == ["第１ 第一", "１ 小", "(1) 細"]
+    assert toc_texts("[TOC:1]") == ["第１ 第一"]
+    assert toc_texts("[TOC：２]") == ["第１ 第一", "１ 小"]
+    assert toc_texts("[TOC:4]") == ["第１ 第一", "１ 小", "(1) 細", "ア 四段"]
     # 段が 1〜9 でなければ記号ではない（そのまま本文になる）
-    assert parse(["{目次:0}"], dt)[0].kind != TOC
-    assert vadm.is_line_mark(" {目次:2} ") and not vadm.is_line_mark("{目次:10}")
+    assert parse(["[TOC:0]"], dt)[0].kind != TOC
+    assert vadm.is_line_mark(" [TOC:2] ") and not vadm.is_line_mark("[TOC:10]")

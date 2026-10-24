@@ -9,7 +9,7 @@ from va_documake.pdfwriter import pdf_bytes
 
 DT = DOC_TYPES["Saiban"]
 TEXT = ["# 認否", "被告の*主張*は**争う**。", "***重ねた語***と*二つ* *目*。", "2*3*4 や * 項目 * は、そのまま。",
-        "| 項目 | 金額 |", "|---|---|", "| *休業損害* | {右}1,000 |"]
+        "| 項目 | 金額 |", "|---|---|", "| *休業損害* | --: 1,000 |"]
 
 
 def test_split_inline_reads_dots():
@@ -24,10 +24,10 @@ def test_split_inline_reads_dots():
 
 def test_dots_with_lead_marks():
     """行全体を * で囲んでも、行頭の記号（配置・見出し・その行だけの記号）として読む（太字と同じ）。"""
-    assert move_wraps_after_marks("*{表題}準備書面*") == "{表題}*準備書面*"
+    assert move_wraps_after_marks("*:=: 準備書面*") == ":=: *準備書面*"
     assert move_wraps_after_marks("*# 見出し*") == "# *見出し*"
-    assert line_mark("*{改ページ}*") == (PAGE_BREAK, 0)
-    p = parse(["*{表題}準備書面*"], DT)[0]
+    assert line_mark("*<<<*") == (PAGE_BREAK, 0)
+    p = parse(["*:=: 準備書面*"], DT)[0]
     assert (p.align, p.text, p.dots) == (TITLE, "準備書面", {0, 1, 2, 3})
 
 

@@ -7,10 +7,11 @@ import re
 import tkinter as tk
 
 from . import vadm
-from .document import (BULLET, CELL_ALIGN_RE, DISTRIBUTE_CLOSE, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN_RE, DISTRIBUTE_RE,
-                       HEADING, HEADING_MARK_RE, INDENT_MARK, LEAD_ALIGN_MARKS, LIST_MARK_RE, NUMBER, TABLE, cell_separators,
-                       has_inline_marks, inline_mark_spans, is_line_mark, leading_wrap, move_wraps_after_marks, parse,
-                       parse_separator, remove_bold, split_inline, split_lead_marks)
+from .document import (BULLET, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN, DISTRIBUTE_RE, HEADING,
+                       HEADING_MARK_RE, INDENT_MARK, LEAD_ALIGN_MARKS, LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, RIGHT_MARK,
+                       TABLE, cell_separators, has_inline_marks, inline_mark_spans, is_line_mark, lead_mark_len,
+                       leading_wrap, move_wraps_after_marks, parse, parse_separator, remove_bold, split_inline,
+                       split_lead_marks)
 from .find_dialog import FindDialog
 from .layout import is_half
 from .pseudonym import TOKEN_RE, normalize_token
@@ -109,7 +110,7 @@ class EditorMixin:
         return out
 
     def _inline_spans(self, raw):
-        """字を囲む記号（** == * {均等:N}…{均等}）の位置と、太字・蛍光ペン・傍点の字の範囲。"""
+        """字を囲む記号（** == * [字]{N}）の位置と、太字・蛍光ペン・傍点の字の範囲。"""
         out, pos = ([], [], [], []), 0
         for line in raw.split("\n"):
             if has_inline_marks(line):
@@ -142,7 +143,7 @@ class EditorMixin:
         self._toggle_wrap("*")
 
     def on_distribute(self):
-        """選んだ字を均等割付にする（{均等:N}文字{均等} で挟む。N は選んだ字の数〔半角は半字〕を切り上げた字数で、
+        """選んだ字を均等割付にする（[文字]{N} の形で挟む。N は選んだ字の数〔半角は半字〕を切り上げた字数で、
         目次と同じくエディターで手で直す。2026-10-24 班長指示）。既に挟まれていれば外す。行をまたぐ選択と、
         空白だけの選択には付けない。Ctrl+Z 1回で戻せる。"""
         try:
@@ -161,29 +162,29 @@ class EditorMixin:
             if whole:
                 with undoable(self.text):
                     self.text.delete(a, b)
-                    self.text.insert(a, whole.group(2))
+                    self.text.insert(a, whole.group(1))
                 return
         sel = self.text.get(a, b)
         if not sel.strip(" 　") or "\n" in sel:
             return
-        before = re.search(DISTRIBUTE_OPEN_RE.pattern + "$", self.text.get(f"{a} linestart", a))
+        before = self.text.get(f"{a} linestart", a).endswith(DISTRIBUTE_OPEN)
         after = DISTRIBUTE_CLOSE_RE.match(self.text.get(b, f"{b} lineend"))
         whole = DISTRIBUTE_RE.fullmatch(sel)
         with undoable(self.text):
             if before and after:
                 self.text.delete(b, f"{b}+{len(after.group(0))}c")
-                self.text.delete(f"{a}-{len(before.group(0))}c", a)
-                a = self.text.index(f"{a}-{len(before.group(0))}c")
+                self.text.delete(f"{a}-{len(DISTRIBUTE_OPEN)}c", a)
+                a = self.text.index(f"{a}-{len(DISTRIBUTE_OPEN)}c")
                 b = self.text.index(f"{a}+{len(sel)}c")
             elif whole:
                 self.text.delete(a, b)
-                self.text.insert(a, whole.group(2))
-                b = self.text.index(f"{a}+{len(whole.group(2))}c")
+                self.text.insert(a, whole.group(1))
+                b = self.text.index(f"{a}+{len(whole.group(1))}c")
             else:
-                opening = f"{{均等:{math.ceil(sum(0.5 if is_half(c) else 1 for c in sel))}}}"
-                self.text.insert(b, DISTRIBUTE_CLOSE)
-                self.text.insert(a, opening)
-                a = self.text.index(f"{a}+{len(opening)}c")
+                closing = f"]{{{math.ceil(sum(0.5 if is_half(c) else 1 for c in sel))}}}"
+                self.text.insert(b, closing)
+                self.text.insert(a, DISTRIBUTE_OPEN)
+                a = self.text.index(f"{a}+{len(DISTRIBUTE_OPEN)}c")
                 b = self.text.index(f"{a}+{len(sel)}c")
         self.text.tag_remove("sel", "1.0", "end")
         self.text.tag_add("sel", a, b)
@@ -301,16 +302,16 @@ class EditorMixin:
         return first, last
 
     def on_align(self, mark):
-        """選んだ行（なければカーソルの行）に配置の記号（{字下} を含む）を付ける。ほかの配置の記号は付け替える
-        （{イン:N} は残す）。
+        """選んだ行（なければカーソルの行）に配置の記号（-> を含む）を付ける。ほかの配置の記号は付け替える
+        （+N は残す）。
 
         対象の行がすべて既にその記号なら、記号を外して標準（左）に戻す（同じボタンをもう一度押すと解除）。
         表の行では、［中央］［右］は、カーソルのあるセル（選んでいれば、選んだ範囲にかかるセル）の先頭の配置の記号を
         付け外しする。区切りの行（2行目）のセルでは、その列の配置（:--- の : の付け方）を変える（2026-10-24 班長指示）。
         """
-        cells = self._table_cells() if mark in ("{中央}", "{右}") else []
+        cells = self._table_cells() if mark in (CENTER_MARK, RIGHT_MARK) else []
         # 区切りの行の列の配置は、カーソル（選んだ範囲）が区切りの行の中だけにあるときに変える
-        columns = self._table_cells(separator=True) if mark in ("{中央}", "{右}") and not cells else []
+        columns = self._table_cells(separator=True) if mark in (CENTER_MARK, RIGHT_MARK) and not cells else []
         first, last = self._line_range()
         rows = []
         for n in range(first, last + 1):
@@ -329,8 +330,8 @@ class EditorMixin:
             self._align_cells(cells, mark)
             self._align_columns(columns, mark)
             for n, line, norm in rows:
-                # 「**{表題}準備書面**」は「{表題}**準備書面**」として扱う。配置の記号と {字下} は付け替え、
-                # {イン:N} は残す（記号の順は、配置・インデント・字下げ）
+                # 「**:=: 準備書面**」は「:=: **準備書面**」として扱う。配置の記号と -> は付け替え、
+                # +N は残す（記号の順は、配置・インデント・字下げ）
                 _, left, _, rest = split_lead_marks(norm)
                 align = "" if release or mark == INDENT_MARK else mark
                 first = not release and mark == INDENT_MARK
@@ -378,6 +379,8 @@ class EditorMixin:
             end -= 1
         m = CELL_ALIGN_RE.match(line, pos, end)
         start = pos + len(m.group(0)) if m and not m.group(1) else pos
+        while start < end and line[start] in " 　":
+            start += 1
         return pos, start, end, m
 
     def _align_cells(self, cells, mark):
@@ -385,7 +388,7 @@ class EditorMixin:
         if not cells:
             return
         found = [self._cell_content(n, s, e)[3] for n, s, e in cells]
-        release = all(m and m.group(2) == mark for m in found)
+        release = all(m and m.group(2).strip() == mark.strip() for m in found)
         for n, s, e in sorted(cells, reverse=True):          # 右・下のセルから（前の位置がずれないように）
             pos, _, _, m = self._cell_content(n, s, e)
             if m:
@@ -394,11 +397,11 @@ class EditorMixin:
                 self.text.insert(f"{n}.{pos}", mark)
 
     def _align_columns(self, columns, mark):
-        """区切りの行のセルの : を付け替える（{中央} は :---:、{右} は ---:）。すべての列が既にその配置なら、
+        """区切りの行のセルの : を付け替える（中央は :---:、右は ---:）。すべての列が既にその配置なら、
         左（---）に戻す。- と = の種類と数は変えない（2重線の設定は変わらない）。"""
         if not columns:
             return
-        want = {"{中央}": (True, True), "{右}": (False, True)}[mark]
+        want = {CENTER_MARK: (True, True), RIGHT_MARK: (False, True)}[mark]
 
         def parts(n, s, e):
             cell = self.text.get(f"{n}.{s + 1}", f"{n}.{e}")
@@ -416,9 +419,9 @@ class EditorMixin:
                 self.text.insert(f"{n}.{start}", new)
 
     def on_indent(self):
-        """選んだ行（なければカーソルの行）に {イン:1} を付ける。対象の行がすべて既に {イン:N} なら外す（ほかの
+        """選んだ行（なければカーソルの行）に +1 を付ける。対象の行がすべて既に +N なら外す（ほかの
         ボタンと同じく、もう一度押すと解除。字数は、目次と同じくエディターで手で直す。2026-10-24 班長指示）。
-        既に {イン:N} のある行の字数は変えない。見出し・箇条書き・段落番号の行には付けない（付けると見出しなどで
+        既に +N のある行の字数は変えない。見出し・箇条書き・段落番号の行には付けない（付けると見出しなどで
         なくなるため）。Ctrl+Z 1回で戻せる。"""
         def target(line):
             if (not line.strip() or line.lstrip().startswith("|") or is_line_mark(line)
@@ -440,7 +443,7 @@ class EditorMixin:
             if parts is None:
                 return None
             align, left, first, rest = parts
-            mark = "" if release else (left or "{イン:1}")
+            mark = "" if release else (left or LEFT_INDENT_MARK)
             return align + mark + (INDENT_MARK if first else "") + rest
         self._edit_lines(change)
 
@@ -499,7 +502,7 @@ class EditorMixin:
         def change(line, n):
             if line.lstrip().startswith("|") or is_line_mark(line) or vadm.SEPARATOR_RE.match(line):
                 return None
-            # 「**{中央}# 見出し**」は「{中央}# **見出し**」として扱う。配置・{イン:N}・{字下} の記号を外す
+            # 「**:-: # 見出し**」は「:-: # **見出し**」として扱う。配置・+N・-> の記号を外す
             line = split_lead_marks(move_wraps_after_marks(line))[3]
             m = HEADING_MARK_RE.match(line)
             if m:
@@ -566,12 +569,12 @@ def _mark_spans(text):
                 out.append((pos + m.start(2), pos + m.end(2)))
         else:
             body = line.lstrip(" 　")
-            # 「**{表題}準備書面**」の記号は、前の ** の後にある
+            # 「**:=: 準備書面**」の記号は、前の ** の後にある
             off = 0
             if move_wraps_after_marks(body) != body:
                 while leading_wrap(body[off:]):
                     off += len(leading_wrap(body[off:]))
-            # 行頭の配置・{イン:N}・{字下} の記号
+            # 行頭の配置・+N・-> の記号
             lead = len(body) - off - len(split_lead_marks(body[off:])[3])
             if lead:
                 start = pos + len(line) - len(body) + off
@@ -594,8 +597,9 @@ def _split_heading(line):
     prefix = line[:len(line) - len(rest)]
     rest = move_wraps_after_marks(rest)
     for mark in LEAD_ALIGN_MARKS:
-        if rest.startswith(mark):
-            prefix, rest = prefix + mark, rest[len(mark):]
+        if lead_mark_len(rest, mark):
+            n = lead_mark_len(rest, mark)
+            prefix, rest = prefix + rest[:n], rest[n:]
             break
     m = HEADING_MARK_RE.match(rest)
     return (prefix + rest[:m.end()], rest[m.end():]) if m else None

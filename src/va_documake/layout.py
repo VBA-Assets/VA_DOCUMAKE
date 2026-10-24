@@ -50,7 +50,7 @@ TOC_MAX_PASSES = 5              # 見出しのページが定まるまで組み�
 
 def toc_entries(paras, levels=TOC_LEVELS):
     """目次に載せる見出し [(段落の番号, 段落)]（levels 段目まで。既定は3段目まで。目次より前の見出しも載せる。
-    Word と同じ）。目次の段落（{目次:2} など）の level が、載せる段。"""
+    Word と同じ）。目次の段落（[TOC:2] など）の level が、載せる段。"""
     # 複合見出しは、まとめた見出しを外側の段の1項目にする（字のない外側の見出しは載せない）
     return [(pi, p) for pi, p in enumerate(paras)
             if p.kind == HEADING and not p.composite and heading_label(paras, pi)[0] <= levels]
@@ -133,7 +133,7 @@ class Typesetter:
         return len(ch) == 1 and is_half(ch) and ch != " "
 
     def make_items(self, text, spans=(), limit=None):
-        """(字, 送り幅) の列。均等割付（{均等:N}…{均等}）の字は、1つの項目（字の並び, N 字の幅）にまとめる（途中で
+        """(字, 送り幅) の列。均等割付（[字]{N}）の字は、1つの項目（字の並び, N 字の幅）にまとめる（途中で
         改行せず、両端揃えでも中の字間は変えない。字数より字が多いときは、割り付けずに字の幅のまま。2026-10-24）。
         limit は組む幅（段落の1行・セルの中）。割り付ける幅は、これより広くしない（大きな字数を入れたとき）。"""
         items, k = [], 0
@@ -160,7 +160,7 @@ class Typesetter:
             ind = dt.title_indent * self.pitch
             return ind, 0.0, ind
         if p.left_indent is not None:
-            # {イン:N}：指定した字数の左インデント（自動調節の対象外。1行目は {字下}・行頭の空白の分だけ下げる）
+            # +N：指定した字数の左インデント（自動調節の対象外。1行目は -> ・行頭の空白の分だけ下げる）
             left = min(p.left_indent, self.dt.chars_lines[0] - 1) * self.pitch
             return left, p.first_indent * self.pitch, 0.0
         if p.kind == HEADING:
@@ -282,7 +282,7 @@ class Typesetter:
     def layout(self, paras):
         """段落のリストを組み、Line のリストを返す。表は self.tables に TablePiece のリストとして入れる。
 
-        目次（{目次}）があれば、目次の長さで見出しのページが変わるので、見出しのページが定まるまで組み直す。
+        目次（[TOC]）があれば、目次の長さで見出しのページが変わるので、見出しのページが定まるまで組み直す。
         """
         pages = None
         for _ in range(TOC_MAX_PASSES):
@@ -347,7 +347,7 @@ class Typesetter:
                     self.first_level = None
                 continue
             if p.kind == BLANK or not (p.number or p.text):
-                # 空の行・中身のない配置の行（{右} だけの行など）は、Word の空の段落と同じく1行使う
+                # 空の行・中身のない配置の行（--: だけの行など）は、Word の空の段落と同じく1行使う
                 self.blank_rows.append(row)
                 row += 1
                 continue
@@ -376,7 +376,7 @@ class Typesetter:
                 row += 1
         return out
 
-    # ---------- 目次（{目次}。2026-10-24 班長指示） ----------
+    # ---------- 目次（[TOC]。2026-10-24 班長指示） ----------
 
     def layout_toc_entry(self, out, pi, h, page, row, level=None, number=None):
         """目次の1項目（見出し h）を組み、次の行を返す。VA公用文で整えた文書に Word の「自動作成の目次 1」を

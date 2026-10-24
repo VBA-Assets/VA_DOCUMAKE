@@ -9,37 +9,42 @@
 ・箇条書き：`- `。段落番号：`1. `（連番。① ② … にする）。
   記号の後に半角空白があるときだけ見出し・箇条書き・段落番号とする（2026-10-23 班長決定。VA公用文は空白が
   なくても記号とみなすが、「-1度」「2026.10.23」で始まる段落の字が消えるので、安全側にした）。
-・配置の記号：行頭の `{表題}` `{中央}` `{右}` `{左}`。
-・`{字下}`：行頭に書くと、その段落の1行目だけを1字下げる（Word の「最初の行のみ1字下げ」。全角スペースを使わないため。
+・記号の形（2026-10-25 班長決定）：もとは `{右}` `{字下}` のような波かっこの語の記号だったが、マークダウンの表の
+  区切りの行（`:---:` `---:`）にならい、記号で表す形に改めた。Ver120 までの古い形は読まない（2026-10-25 班長決定）。行頭の記号は、見出しの `# ` と同じく、
+  後ろに半角空白があるときだけ記号とする（行末なら空白はなくてよい）。
+・配置の記号：行頭の `:=: `（表題）、`:-: `（中央）、`--: `（右）、`:-- `（左）。コロンのある側に寄せる（表の区切りの行と
+  同じ）。`=` は表の2重線と同じく「強い」意味で、表題に使う。
+・`-> `：行頭に書くと、その段落の1行目だけを1字下げる（Word の「最初の行のみ1字下げ」。全角スペースを使わないため。
   2026-10-23 班長指示）。見出しの後に使うと、右揃えの段落と同じく、その段落から先（次のセクション区切りまで）は
   見出し・番号・インデントの変換をしない（その段落自身も変換せず、1行目を1字下げて組む。見出しのある段落の中では
   1字下げを使わないため。2026-10-23 班長指示）。
-・`{イン:2}`：行頭（配置の記号の後）に書くと、その段落の左インデントを全角2字にする（数字は 0〜99。全角でもよい。
-  数字を省くと1字。「インデント」の略。長い `{インデント:2}` も読む）。見出しの段に合わせた自動のインデントは付けず、見出し・箇条書き・段落番号の変換もしない（VA公用文の
-  「行間詰め」と同じく、インデントの自動調節の対象外。2026-10-24 班長指示）。マークダウンには左インデントの字数を
-  指定する記号がないので、目次と同じ形の独自の記号にした。`{字下}` と一緒に使うと、1行目をさらに1字下げる
-  （このときの `{字下}` は、その段落の1行目を下げるだけで、後の段落の変換は止めない）。
-・`{改ページ}`：その行だけを書いた行で、ページを改める（見出しの番号は続く）。
-・`{目次}`：その行だけを書いた行に、見出しの3段目までの目次を組む（layout.py。2026-10-24 班長指示）。
-  `{目次:2}` のように段（1〜9）を書き添えると、その段までを載せる（2026-10-24 班長指示。コロン・数字は全角でもよい）。
-・`{セクション区切り}`：VA公用文のセクション区切りと同じ。ページを改め、見出しの番号を振り直し、
+・`+2 `：行頭（配置の記号の後）に書くと、その段落の左インデントを全角2字にする（数字は 0〜99。全角の数字・＋でもよい）。
+  見出しの段に合わせた自動のインデントは付けず、見出し・箇条書き・段落番号の変換もしない（VA公用文の
+  「行間詰め」と同じく、インデントの自動調節の対象外。2026-10-24 班長指示）。「+81 3-1234-5678」のような電話番号の
+  字を消さないよう、空白の後が数字・括弧・ハイフン・空白だけのもの（字のない行も）は記号とみなさない。`-> ` と一緒に使うと（`+2 -> 本文`）、1行目を
+  さらに1字下げる（このときの `-> ` は、その段落の1行目を下げるだけで、後の段落の変換は止めない）。
+・`<<<`：その行だけを書いた行で、ページを改める（見出しの番号は続く。AsciiDoc の改ページの記号と同じ）。
+・`[TOC]`：その行だけを書いた行に、見出しの3段目までの目次を組む（layout.py。2026-10-24 班長指示。Python-Markdown・
+  Typora などの目次の記号と同じ。小文字でもよい）。`[TOC:2]` のように段（1〜9）を書き添えると、その段までを載せる
+  （2026-10-24 班長指示。コロン・数字は全角でもよい）。
+・`<<<=`：セクション区切り。VA公用文のセクション区切りと同じ。ページを改め、見出しの番号を振り直し、
   「最初の見出しを過ぎたか」「右揃えの段落を過ぎたか」「最初の階層」を初めに戻す（2026-10-23 班長決定）。
 ・太字：`**文字**`（同じ行の中で対になったもの。記号の直後・直前が空白のものは除く）。記号を除いた字を太字の範囲とし、
   ＭＳ ゴシックで描く（VA公用文シリーズの VAスタイルの「太字」と同じ。字の幅が変わらない。2026-10-24 班長指示）。
-  表のセルの中でも使える。目次の項目には太字を付けない。「**# 見出し**」「**{表題}準備書面**」のように行全体を囲んだものは、
-  行頭の記号（配置の記号・{字下}・見出し・箇条書き・段落番号）の後に記号を移して読む（「# **見出し**」。その行だけの記号
-  「**{改ページ}**」なども記号とする。2026-10-24 班長指示）。`__` `_` の強調は、整形（cleanup.py）で取り除く（`*` は傍点の記号）。
+  表のセルの中でも使える。目次の項目には太字を付けない。「**# 見出し**」「**:=: 準備書面**」のように行全体を囲んだものは、
+  行頭の記号（配置の記号・-> ・見出し・箇条書き・段落番号）の後に記号を移して読む（「# **見出し**」。その行だけの記号
+  「**<<<**」なども記号とする。2026-10-24 班長指示）。`__` `_` の強調は、整形（cleanup.py）で取り除く（`*` は傍点の記号）。
 ・傍点：`*文字*`（マークダウンの「強調」。日本語の組版では強調を傍点で表す。2026-10-24 班長決定）。記号を除いた字の上の
   中央に黒丸を付ける（VAスタイルの傍点の既定「黒丸」〔Word の EmphasisMark＝OverSolidCircle〕と同じ形）。黒丸は行の間に
   置き、字の位置・改行・改ページは変えない。太字と重ねると `***文字***`（太字の記号を先に読み、残った * を傍点とする）。
   記号の内側が空白で始まる（終わる）もの、* の外側に英数字が続くもの（「2*3*4」など）は記号とみなさない。表のセルでも
   使える。見出し・段落番号の番号には付けない。目次の項目には付けない。VA公用文は *文字* の * を取り除く（字は残る）。
-・均等割付：``{均等:5}原告{均等}``（太字の ** と同じく、同じ行の中で記号に挟まれた字。始めの記号に字数〔全角。0〜99。
-  全角の数字・コロンでもよい〕を書く。終わりに字数を書いた {均等:5} も読む。2026-10-24 班長指示）。挟まれた字を、
+・均等割付：`[原告]{5}`（同じ行の中で、角かっこで挟んだ字。波かっこに字数〔全角。0〜99。全角の数字でもよい〕を書く。
+  2026-10-24 班長指示。Pandoc の [字]{属性} と同じ形。2026-10-25 班長決定）。挟まれた字を、
   1字目を左端、最後の字を字数の右端に置いて、字の間を均等に空ける（Word の均等割り付けと同じ）。表のセルでも使える。
 ・空の行：Word（VA公用文）の空の段落と同じく、1行分あける（2026-10-23 班長決定。もとは空の行を段落の区切りとして
   読み飛ばし、1行あけるには `{空行}` を書いていたが、VA公用文との互換のため改めた）。
-・中身のない配置の行（`{右}` だけの行など）も、Word と同じく1行分あける。右揃えなら、そこから先は変換しない。
+・中身のない配置の行（`--:` だけの行など）も、Word と同じく1行分あける。右揃えなら、そこから先は変換しない。
 ・行頭の空白は取り除き、段落の書き出しのインデント（全角1つで1字、半角1つで半字）にする（VA公用文
   clsPreFormatter.ReplaceSpaceWithIndent と同じ）。効くのは、見出し・本文として整えない段落（最初の見出しより前、
   右揃えの段落の後）だけ。見出し・本文・リストは、VA公用文と同じくインデントを付け直す。
@@ -61,17 +66,24 @@ from .doctypes import number_text
 # 段落の種類
 HEADING, BODY, BULLET, NUMBER = "heading", "body", "bullet", "number"
 PAGE_BREAK, SECTION_BREAK, BLANK, TABLE = "pagebreak", "section", "blank", "table"
-TOC = "toc"                 # 目次（{目次} だけの行）
+TOC = "toc"                 # 目次（[TOC] だけの行）
 # 配置
 JUSTIFY, CENTER, RIGHT, TITLE = "justify", "center", "right", "title"
 
-ALIGN_MARKS = {"{表題}": TITLE, "{中央}": CENTER, "{右}": RIGHT, "{左}": JUSTIFY}    # 行頭の配置の記号
-INDENT_MARK = "{字下}"
+# 行頭の記号は、後ろの半角の空白までを記号とする（行末なら空白はなくてよい。lead_mark_len）
+ALIGN_MARKS = {":=: ": TITLE, ":-: ": CENTER, "--: ": RIGHT, ":-- ": JUSTIFY}    # 行頭の配置の記号
+TITLE_MARK, CENTER_MARK, RIGHT_MARK = ":=: ", ":-: ", "--: "
+INDENT_MARK = "-> "         # 1行目だけ1字下げる
 LEAD_ALIGN_MARKS = (*ALIGN_MARKS, INDENT_MARK)     # 画面で配置と同じく付け替える行頭の記号
-LEFT_INDENT_RE = re.compile(r"\{イン(?:デント)?(?:[:：]([0-9０-９]{1,2}))?\}")   # {イン:2}（左インデントの字数）
-_LINE_MARKS = {"{改ページ}": PAGE_BREAK, "{セクション区切り}": SECTION_BREAK}
+# +2（左インデントの字数）。「+81 3-1234-5678」のような電話番号を記号とみなさないよう、空白の後が数字・括弧・
+# ハイフン・空白だけのもの（字のない行も）は除く（「+2 1. 本文」は記号）
+LEFT_INDENT_RE = re.compile(r"[+＋]([0-9０-９]{1,2}) (?![0-9０-９()（）+＋.．\-－‐ 　]*$)")
+LEFT_INDENT_MARK = "+1 "    # ［インデント］で付ける記号
+PAGE_BREAK_MARK, SECTION_BREAK_MARK = "<<<", "<<<="
+_LINE_MARKS = {PAGE_BREAK_MARK: PAGE_BREAK, SECTION_BREAK_MARK: SECTION_BREAK}
 TOC_LEVELS = 3              # 目次に載せる見出しの段の既定（Word の「自動作成の目次 1」と同じ）
-_TOC_RE = re.compile(r"\{目次(?:[:：]([1-9１-９]))?\}")
+_TOC_RE = re.compile(r"\[(?i:toc)(?:[:：]([1-9１-９]))?\]")
+TOC_MARK = "[TOC:3]"        # ［目次］で入れる記号
 # 見出しの記号。字のない見出し（「#」だけの行。複合見出しの外側の段）も含む
 HEADING_MARK_RE = re.compile(r"(#{1,9})(?: |[ 　]*$)")
 _NUMBERED_RE = re.compile(r"(\d+)\. ")
@@ -84,11 +96,18 @@ _DOT_RE = re.compile(r"(?<![*0-9A-Za-z])\*(?![ *])([^*\n]+?)(?<![ *])\*(?![*0-9A
 # 字を囲む記号（太字・蛍光ペン・傍点）。長いものから並べる（「***」の先頭は ** とみなす）
 _WRAPS = {"**": _BOLD_RE, "==": _HIGHLIGHT_RE, "*": _DOT_RE}
 WRAP_MARKS = tuple(_WRAPS)
-# 均等割付（{均等:5}原告{均等}）。始めの記号に字数を書く。終わりの記号の字数は省いてよい
-DISTRIBUTE_OPEN_RE = re.compile(r"\{均等[:：]([0-9０-９]{1,2})\}")
-DISTRIBUTE_CLOSE_RE = re.compile(r"\{均等(?:[:：][0-9０-９]{1,2})?\}")
-DISTRIBUTE_CLOSE = "{均等}"
-DISTRIBUTE_RE = re.compile(DISTRIBUTE_OPEN_RE.pattern + r"([^{}\n]+?)" + DISTRIBUTE_CLOSE_RE.pattern)
+# 均等割付（[原告]{5}）。角かっこで挟んだ字を、波かっこの字数の幅に割り付ける（Pandoc の [字]{属性} と同じ形）
+DISTRIBUTE_OPEN = "["
+DISTRIBUTE_CLOSE_RE = re.compile(r"\]\{([0-9０-９]{1,2})\}")
+DISTRIBUTE_RE = re.compile(r"\[([^\[\]\n]+?)" + DISTRIBUTE_CLOSE_RE.pattern)     # group(1) が字、group(2) が字数
+
+
+def lead_mark_len(s, mark, k=0):
+    """s の k 字目に行頭の記号 mark（後ろの半角の空白を含む）があれば、その字数（行末なら空白はなくてよい）。
+    なければ 0。"""
+    if s.startswith(mark, k):
+        return len(mark)
+    return len(mark) - 1 if s[k:] == mark[:-1] else 0
 
 
 class Inline(NamedTuple):
@@ -127,7 +146,7 @@ def _wrap_spans(s):
 
 
 def split_inline(s):
-    """字を囲む記号（**文字** の太字、==文字== の蛍光ペン、*文字* の傍点、{均等:N}文字{均等} の均等割付）を除く。
+    """字を囲む記号（**文字** の太字、==文字== の蛍光ペン、*文字* の傍点、[文字]{N} の均等割付）を除く。
     (記号を除いた文字列, 太字の字の位置の集合, 蛍光ペンの字の位置の集合, 各字の s での位置のリスト＋末尾) を返す。
     重ねてよい（**==文字==**）。傍点・均等割付も要るときは split_inline_full を使う。"""
     r = split_inline_full(s)
@@ -143,9 +162,9 @@ def split_inline_full(s):
         inside[w].update(range(ia, ib))
     spans = []
     for m in DISTRIBUTE_RE.finditer(s):
-        marker.update(range(m.start(), m.start(2)))
-        marker.update(range(m.end(2), m.end()))
-        spans.append((m.start(2), m.end(2), int(m.group(1))))      # int は全角の数字も読む
+        marker.update(range(m.start(), m.start(1)))
+        marker.update(range(m.end(1), m.end()))
+        spans.append((m.start(1), m.end(1), int(m.group(2))))      # int は全角の数字も読む
     plain, cols, index_of = [], [], {}
     found = {w: set() for w in _WRAPS}
     for k, ch in enumerate(s):
@@ -169,24 +188,25 @@ def remove_bold(s):
 
 
 def move_wraps_after_marks(line, lists=True):
-    """「**{表題}準備書面**」「**# 見出し**」「==# 見出し==」のように、行（セル）全体を囲む太字・蛍光ペンの記号が、
-    行頭の記号（配置の記号・{字下}・見出し・箇条書き・段落番号）の前にあるときは、記号の後に移す（「{表題}**準備書面**」
+    """「**:=: 準備書面**」「**# 見出し**」「==# 見出し==」のように、行（セル）全体を囲む太字・蛍光ペンの記号が、
+    行頭の記号（配置の記号・-> ・見出し・箇条書き・段落番号）の前にあるときは、記号の後に移す（「:=: **準備書面**」
     「# **見出し**」）。AI は行を丸ごと太字にすることがあり、VA公用文は ** を取り除いて記号として読むので、同じく記号と
     する（2026-10-24 班長指示）。字の数は変わらない。lists が偽なら（右揃えの段落の後など）、見出し・箇条書き・
-    段落番号の記号は移さない。{字下} の後の見出しなどの記号も移さない（{字下} の段落は見出しにしないため）。
+    段落番号の記号は移さない。-> ・+N の後の見出しなどの記号も移さない（その段落は見出しにしないため）。
     「**==…==**」のように重ねたものは、内側から移す。"""
     wrap = leading_wrap(line)
     if wrap is None:
         return line
     rest, k = move_wraps_after_marks(line[len(wrap):], lists), 0
     for mark in ALIGN_MARKS:
-        if rest.startswith(mark):
-            k = len(mark)
+        if lead_mark_len(rest, mark):
+            k = lead_mark_len(rest, mark)
             break
     while True:
         m = LEFT_INDENT_RE.match(rest, k)
-        if rest.startswith(INDENT_MARK, k) or m:
-            k = m.end() if m else k + len(INDENT_MARK)
+        n = lead_mark_len(rest, INDENT_MARK, k)
+        if n or m:
+            k = m.end() if m else k + n
             lists = False
             continue
         break
@@ -207,13 +227,13 @@ def inline_mark_spans(s):
         marks += [(a, a + len(w)), (e - len(w), e)]
         inner[w].append((ia, ib))
     for m in DISTRIBUTE_RE.finditer(s):
-        marks += [(m.start(), m.start(2)), (m.end(2), m.end())]
+        marks += [(m.start(), m.start(1)), (m.end(1), m.end())]
     return marks, inner["**"], inner["=="], inner["*"]
 
 
 def has_inline_marks(s):
     """字を囲む記号（太字・蛍光ペン・傍点・均等割付）がありそうか（ない行を早く飛ばすため）。"""
-    return "*" in s or "==" in s or "{均等" in s
+    return "*" in s or "==" in s or "]{" in s
 
 
 def heading_label(paras, pi):
@@ -230,11 +250,11 @@ def heading_label(paras, pi):
 
 
 def line_mark(s):
-    """その行だけを書く記号（{改ページ} {セクション区切り} {目次} {目次:2}）なら (段落の種類, 目次の段)、
+    """その行だけを書く記号（<<< <<<= [TOC] [TOC:2]）なら (段落の種類, 目次の段)、
     そうでなければ (None, 0)。s は前後の空白を除いた行。"""
     wrap = leading_wrap(s)
     while wrap and len(s) > 2 * len(wrap) and s.endswith(wrap):
-        # 太字・蛍光ペン・傍点の記号で囲んだもの（**{改ページ}**）も記号とする（2026-10-24 班長指示）
+        # 太字・蛍光ペン・傍点の記号で囲んだもの（**<<<**）も記号とする（2026-10-24 班長指示）
         s = s[len(wrap):-len(wrap)]
         wrap = leading_wrap(s)
     if s in _LINE_MARKS:
@@ -246,7 +266,7 @@ def line_mark(s):
 
 
 def is_line_mark(line):
-    """その行だけを書く記号（{改ページ} {セクション区切り} {目次} {目次:2} など）の行か。"""
+    """その行だけを書く記号（<<< <<<= [TOC] [TOC:2] など）の行か。"""
     return line_mark(line.strip())[0] is not None
 
 
@@ -261,7 +281,7 @@ class Para:
     number_index: int = 0   # 段落番号の通し番号（1 から）
     align: str = JUSTIFY
     first_indent: float = 0.0  # 行頭の空白から変換した、書き出しのインデント（字）
-    left_indent: int = None    # {イン:N} の左インデント（字）。None なら自動（見出しの段に合わせる）
+    left_indent: int = None    # +N の左インデント（字）。None なら自動（見出しの段に合わせる）
     table: object = None       # 表のとき Table
     # 元の行（parse に渡した行の番号）と、本文の1字目がその行の何字目か（確認表示とエディターの連動に使う）。
     # 表は src_line〜src_end の行
@@ -303,10 +323,11 @@ class Table:
 # 表の区切りの行（|---|:===:| など）
 _TABLE_SEP_CELL_RE = re.compile(r"^\s*(:?)([-=])\2*(:?)\s*$")
 _LEFT = "left"
-CELL_ALIGNS = {"{左}": _LEFT, "{中央}": CENTER, "{右}": RIGHT}     # セルの先頭の配置の記号
+CELL_ALIGNS = {":-- ": _LEFT, ":-: ": CENTER, "--: ": RIGHT}     # セルの先頭の配置の記号（行頭の記号と同じ形）
 # セルの先頭の配置の記号（太字・蛍光ペンの記号の内側にあってもよい）。group(1) が前の囲む記号、group(2) が配置の記号
-CELL_ALIGN_RE = re.compile("((?:" + "|".join(map(re.escape, WRAP_MARKS)) + ")*)("
-                           + "|".join(map(re.escape, CELL_ALIGNS)) + ")")
+# （後ろの半角の空白を含む。セルの終わりなら空白はなくてよい）
+CELL_ALIGN_RE = re.compile("((?:" + "|".join(map(re.escape, WRAP_MARKS)) + ")*)((?:"
+                           + "|".join(re.escape(m.strip()) for m in CELL_ALIGNS) + ")(?: |$))")
 
 
 def cell_separators(line):
@@ -356,12 +377,18 @@ def parse_separator(line):
 
 def _cell(text, default_align):
     """セルの文字列から、先頭の配置の記号を読み取る。記号がなければ列の配置にする。
-    「**{右}金額**」のように太字の記号で囲んだものも、配置の記号として読む（2026-10-24 班長指示）。"""
+    「**--: 金額**」のように太字の記号で囲んだものも、配置の記号として読む（2026-10-24 班長指示）。"""
     text = move_wraps_after_marks(text, lists=False)
     for mark, align in CELL_ALIGNS.items():
-        if text.startswith(mark):
-            return align, text[len(mark):].strip()
+        if lead_mark_len(text, mark):
+            return align, text[lead_mark_len(text, mark):].strip()
     return default_align, text
+
+
+def cell_align_mark(text):
+    """セルの文字列の先頭の配置の記号（後ろの空白を含む形）。なければ ""。"""
+    text = move_wraps_after_marks(text.strip(), lists=False)
+    return next((mark for mark in CELL_ALIGNS if lead_mark_len(text, mark)), "")
 
 
 def parse_table(lines):
@@ -390,22 +417,23 @@ def parse_table(lines):
     return table
 
 
-def left_indent_of(m):
-    """{イン:N} の一致から字数を返す（数字を省くと1。int は全角の数字も読む）。"""
-    return int(m.group(1)) if m.group(1) else 1
+def left_indent_of(mark):
+    """+N の記号（split_lead_marks が返す形）から字数を返す（int は全角の数字も読む）。"""
+    return int(mark.strip()[1:])
 
 
 def split_lead_marks(line):
-    """行頭の記号を読む。(配置の記号, {イン:N} の記号, {字下} があるか, 残り) を返す（記号がなければ ""）。
-    配置の記号が先、{イン:N} と {字下} は順不同（エディターの付け外しと、AI の回答の確かめに使う）。"""
-    align = next((m for m in ALIGN_MARKS if line.startswith(m)), "")
-    rest, left, first = line[len(align):], "", False
+    """行頭の記号を読む。(配置の記号, +N の記号, -> があるか, 残り) を返す（記号がなければ ""）。
+    配置の記号が先、+N と -> は順不同（エディターの付け外しと、AI の回答の確かめに使う）。記号は、後ろの半角の
+    空白を付けた形で返す（行末で空白のないものも）。"""
+    align = next((m for m in ALIGN_MARKS if lead_mark_len(line, m)), "")
+    rest, left, first = line[lead_mark_len(line, align) if align else 0:], "", False
     while True:
         m = LEFT_INDENT_RE.match(rest)
         if m and not left:
-            left, rest = m.group(0), rest[m.end():]
-        elif rest.startswith(INDENT_MARK) and not first:
-            first, rest = True, rest[len(INDENT_MARK):]
+            left, rest = m.group(0).rstrip() + " ", rest[m.end():]
+        elif lead_mark_len(rest, INDENT_MARK) and not first:
+            first, rest = True, rest[lead_mark_len(rest, INDENT_MARK):]
         else:
             return align, left, first, rest
 
@@ -413,8 +441,8 @@ def split_lead_marks(line):
 def split_align(line):
     """行頭の配置の記号を取り除き、(配置, 残りの文字列) を返す。"""
     for mark, align in ALIGN_MARKS.items():
-        if line.startswith(mark):
-            return align, line[len(mark):]
+        if lead_mark_len(line, mark):
+            return align, line[lead_mark_len(line, mark):]
     return JUSTIFY, line
 
 
@@ -464,15 +492,15 @@ def parse(lines, dt):
                 current, seen, stopped = 0, False, False
             continue
         line, indent = split_leading_space(line)
-        line = move_wraps_after_marks(line, lists=not stopped)  # 「**{表題}準備書面**」「**# 見出し**」
+        line = move_wraps_after_marks(line, lists=not stopped)  # 「**:=: 準備書面**」「**# 見出し**」
         align, line = split_align(line)
         _, left_mark, first_mark, line = split_lead_marks(line)
-        left_indent = left_indent_of(LEFT_INDENT_RE.match(left_mark)) if left_mark else None
+        left_indent = left_indent_of(left_mark) if left_mark else None
         if first_mark:
             indent += 1
             if seen and left_indent is None:
-                stopped = True      # 見出しの後の {字下} は、右揃えの段落と同じく変換を止める（その段落から）
-        if not stopped and left_indent is None:      # {イン:N} の段落は、見出しなどに変換しない
+                stopped = True      # 見出しの後の -> は、右揃えの段落と同じく変換を止める（その段落から）
+        if not stopped and left_indent is None:      # +N の段落は、見出しなどに変換しない
             m_head = HEADING_MARK_RE.match(line)
             m_num = _NUMBERED_RE.match(line)
         else:

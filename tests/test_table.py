@@ -14,7 +14,7 @@ SAIBAN = DOC_TYPES["Saiban"]
 
 
 def test_parse_alignment_and_double_rule():
-    t = parse_table(["| {中央}科目 | 摘要 | {左}金額 |", "|===|:---:|---:|", "| 参加費 | 500円 | 48,000 |"])
+    t = parse_table(["| :-: 科目 | 摘要 | :-- 金額 |", "|===|:---:|---:|", "| 参加費 | 500円 | 48,000 |"])
     # 見出しの行：記号のあるセルは記号の配置、ないセルは列の配置
     assert t.header == [("center", "科目"), ("center", "摘要"), ("left", "金額")]
     # それ以外の行：列の配置（区切りの行の :）

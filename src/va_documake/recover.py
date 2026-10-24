@@ -6,6 +6,9 @@
   1本の文字列にし、記号（〔人名Ａ〕など）は1字の目印（私用領域の字）に置き換える。
 ・2つを difflib で突き合わせ、目印の字に対応する PDF の字の並びを、その記号の元の語とする。同じ記号が
   何度も出てくるときは、いちばん多く対応した語を採り、食い違いがあれば知らせる。
+・均等割付の範囲の境目は PDF の字の並びに残らないので、字の位置（1字目の左端から字数の幅）で求め、両方の
+  文字列の同じ位置に区切りを入れてから突き合わせる（範囲の中の記号と外の記号が隣り合うと、切れ目が定まらないため。
+  2026-10-25）。
 ・求めた語で目印を置き換えた文字列が PDF の文字列と一致すれば、すべての記号が確かに求まっている（exact）。
 試作（試作\\recover_map.py）で、同じ版なら短い文書・14ページの文書とも、すべての記号の元の語が求まった。
 """
@@ -26,6 +29,7 @@ from .pseudonym import TOKEN_RE, Dictionary, normalize_token
 
 _MARK_BASE = 0xE000
 _TOC_FILL = "\uF8FF"     # 目次の点線とページ番号の位置（PDF にだけある。一致の確かめでは「点の並び＋数字」とみなす）
+_SEP = "\x1f"           # 均等割付の範囲の境目（突き合わせのときだけ、両方の文字列の同じ位置に入れる）
 _SPACE_RE = re.compile(r"\s+")
 
 
@@ -42,23 +46,27 @@ class Recovery:
 
 
 def pdf_body_text(path, ts):
-    """PDF の本文の範囲の字を、描いた順に1本の文字列にする（空白も残す。名前の中の空白を戻すため）。"""
+    """PDF の本文の範囲の字を、描いた順に1本の文字列にする（空白も残す。名前の中の空白を戻すため）。
+    (文字列, [(ページ, 字の左端, 基準線)]) を返す（位置は均等割付の範囲を求めるのに使う）。"""
     top = ts.margin_top
     bottom = ts.margin_top + ts.lines_page * ts.line_pitch
-    out = []
+    out, where = [], []
     with fitz.open(path) as doc:
-        for page in doc:
+        for pi, page in enumerate(doc):
             for span in page.get_texttrace():
                 for ch in span["chars"]:
                     x, y = ch[2]    # 字の左端と基準線（用紙の上端から）
                     # 本文の左端より左（行番号）は除く
                     if top < y <= bottom + 1 and x >= ts.margin_left - 1:
                         out.append(chr(ch[0]))
-    return "".join(out)
+                        where.append((pi, x, y))
+    return "".join(out), where
 
 
 def vadm_body_text(lines, dt):
-    """構文ファイルの文書を、PDF と同じ並びの文字列にする。(文字列, {目印: 記号}) を返す。"""
+    """構文ファイルの文書を、PDF と同じ並びの文字列にする。
+
+    (文字列, {目印: 記号}, 均等割付の範囲 [(始め, 終わり, 字数)]〔文字列の何字目か〕) を返す。"""
     marks = {}
 
     def sub(m):
@@ -67,25 +75,157 @@ def vadm_body_text(lines, dt):
             marks[tok] = chr(_MARK_BASE + len(marks))
         return marks[tok]
     paras = parse([TOKEN_RE.sub(sub, ln) for ln in lines], dt)
-    parts = []
+    parts, spans, pos = [], [], 0
+
+    def add(text, distribute=(), shift=0):
+        nonlocal pos
+        spans.extend((pos + shift + a, pos + shift + b, n) for a, b, n in distribute)
+        parts.append(text)
+        pos += len(text)
     for p in paras:
         if p.kind == TABLE:
-            for row in [p.table.header] + p.table.rows:
-                parts.extend(text for _, text in row)
+            for ri, row in enumerate([p.table.header] + p.table.rows):
+                for k, (_, text) in enumerate(row):
+                    add(text, p.table.distribute.get((ri, k), ()))
         elif p.kind == TOC:
             # 目次の行（番号＋半角の空白＋見出し。点線とページ番号は PDF にだけあり、突き合わせでは飛ばされる）
             for hi, h in toc_entries(paras, p.level):
                 number = heading_label(paras, hi)[1]
-                parts.append(number.rstrip(" 　") + (" " if number.strip() else "") + h.text + _TOC_FILL)
+                add(number.rstrip(" 　") + (" " if number.strip() else "") + h.text + _TOC_FILL)
         else:
-            parts.append(p.number + p.text)
-    return "".join(parts), {v: k for k, v in marks.items()}
+            add(p.number + p.text, p.distribute, len(p.number))
+    return "".join(parts), {v: k for k, v in marks.items()}, spans
+
+
+def _boundary(ops, b):
+    """v の b 字目の前の境目に当たる p の位置（突き合わせで定まらない区間の中なら None）。"""
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal" and i1 <= b <= i2:
+            return j1 + b - i1
+        if tag != "equal" and b == i1:
+            return j1
+        if tag != "equal" and b == i2:
+            return j2
+    return None
+
+
+def _distribute_extent(p, where, ts, n, start=None, end=None):
+    """均等割付の範囲の、p での始め（end から）か終わり（start から）を、字の位置から求める。
+
+    割り付けた範囲は、1字目の左端から最後の字の右端までが n 字の幅になる（layout）。字の幅の合計が n 字の幅より
+    狭い（字の間が空いている）ときだけ当てはめる。字の幅のまま並んだとき（字数より字が多いなど）は、普通の字と
+    見分けられないので None。"""
+    wide = n * ts.pitch
+    if start is not None and start < len(p):
+        page, x0, y0 = where[start]
+        natural = 0.0
+        for e in range(start, len(p)):
+            pg, x, y = where[e]
+            if pg != page or abs(y - y0) > 0.5:
+                break
+            natural += ts.advance(p[e])
+            right = x + ts.advance(p[e])
+            if abs(right - (x0 + wide)) < 0.1:
+                return e + 1 if natural < wide - 0.1 else None
+            if right > x0 + wide:
+                break
+    if end is not None and 0 < end <= len(p):
+        page, x1, y0 = where[end - 1]
+        left = x1 + ts.advance(p[end - 1]) - wide
+        natural = 0.0
+        for s in range(end - 1, -1, -1):
+            pg, x, y = where[s]
+            if pg != page or abs(y - y0) > 0.5:
+                break
+            natural += ts.advance(p[s])
+            if abs(x - left) < 0.1:
+                return s if natural < wide - 0.1 else None
+            if x < left:
+                break
+    return None
+
+
+def _separate_distribute(v, p, where, spans, mark_to_token, ts):
+    """均等割付の範囲の境目に、v・p の同じ位置へ区切りの字を入れる。
+
+    割り付けた字の間の空きは PDF の字の並びに残らないので、範囲の中の記号と外の字（記号）が隣り合うと
+    （「[〔その他Ａ〕]{5}〔人名Ａ〕」→「原告甲野太郎」）、どこで切れるかが突き合わせでは定まらない。範囲の片方の
+    端が突き合わせで定まれば、もう片方の端は字の位置から求まる。区切りを入れて突き合わせ直すと、新しく端が
+    定まる範囲があるので、繰り返す。(区切りを入れた v, p) を返す。"""
+    spans = [s for s in spans if any(c in mark_to_token for c in v[s[0]:s[1]])]
+    cuts = {}       # v の何字目の前 → p の何字目の前
+    done = set()
+    while True:
+        vs, ps = _with_cuts(v, sorted(cuts)), _with_cuts(p, sorted(cuts.values()))
+        ops = difflib.SequenceMatcher(None, vs, ps, autojunk=False).get_opcodes()
+        v_pos = _cut_positions(len(v), sorted(cuts))
+        p_orig = _orig_positions(ps)
+        added = False
+        for a, b, n in spans:
+            if (a, b) in done:
+                continue
+            # 範囲の始め（区切りの後ろ）と終わり（区切りの前）が突き合わせで定まるか
+            ja, jb = _boundary(ops, v_pos[a]), _boundary(ops, v_pos[b - 1] + 1)
+            ja = None if ja is None else p_orig[ja]
+            jb = None if jb is None else p_orig[jb]
+            if ja is not None and jb is None:
+                jb = _distribute_extent(p, where, ts, n, start=ja)
+            elif jb is not None and ja is None:
+                ja = _distribute_extent(p, where, ts, n, end=jb)
+            if ja is None or jb is None or ja >= jb:
+                continue
+            new = dict(cuts)
+            if new.setdefault(a, ja) != ja or new.setdefault(b, jb) != jb:
+                continue
+            keys = sorted(new)
+            if [new[k] for k in keys] != sorted(new[k] for k in keys):
+                continue    # 前後が入れ替わる区切りは採らない
+            cuts = new
+            done.add((a, b))
+            added = True
+        if not added:
+            return vs, ps
+
+
+def _with_cuts(s, at):
+    """s の at（昇順）の各位置の前に区切りの字を入れる。"""
+    out, k = [], 0
+    for i in at:
+        out.append(s[k:i])
+        out.append(_SEP)
+        k = i
+    out.append(s[k:])
+    return "".join(out)
+
+
+def _cut_positions(n, at):
+    """区切りを入れる前の何字目が、入れた後の何字目になるか（n 字分）。"""
+    pos, shift, at = [], 0, list(at)
+    for i in range(n + 1):
+        while at and at[0] == i:
+            shift += 1
+            at.pop(0)
+        pos.append(i + shift)
+    return pos
+
+
+def _orig_positions(s):
+    """区切りを入れた文字列の各位置（境目）が、区切りを入れる前の何字目の前に当たるか。"""
+    out, k = [], 0
+    for c in s:
+        out.append(k)
+        if c != _SEP:
+            k += 1
+    out.append(k)
+    return out
 
 
 def recover(vadm_lines, pdf_path, dt):
     """突き合わせて Recovery を返す。"""
-    v, mark_to_token = vadm_body_text(vadm_lines, dt)
-    p = pdf_body_text(pdf_path, Typesetter(dt))
+    ts = Typesetter(dt)
+    v_plain, mark_to_token, spans = vadm_body_text(vadm_lines, dt)
+    p_plain, where = pdf_body_text(pdf_path, ts)
+    v, p = _separate_distribute(v_plain, p_plain, where, spans, mark_to_token, ts)
     sm = difflib.SequenceMatcher(None, v, p, autojunk=False)
     votes = defaultdict(Counter)
     pending = []
@@ -93,7 +233,7 @@ def recover(vadm_lines, pdf_path, dt):
         if tag == "equal":
             continue
         seg_v, seg_p = v[i1:i2], p[j1:j2]
-        if len(seg_v) == 1 and seg_v in mark_to_token and tag == "replace":
+        if len(seg_v) == 1 and seg_v in mark_to_token and tag == "replace" and _SEP not in seg_p:
             # 目印だけの区間なら、その区間の PDF の字が元の語
             votes[mark_to_token[seg_v]][seg_p] += 1
         elif any(c in mark_to_token for c in seg_v) and seg_p:
@@ -122,15 +262,15 @@ def recover(vadm_lines, pdf_path, dt):
         pending = rest
     # 予備：まだ求まらない記号は、記号の前後の字（3〜8字ずつ）が PDF で「前の字＋何か＋後の字」に
     # なっている箇所を探す（版ずれで、記号の近くが書き換わった場合のため）
-    for k, ch in enumerate(v):
+    for k, ch in enumerate(v_plain):
         tok = mark_to_token.get(ch)
         if tok is None or votes[tok]:
             continue
-        before = re.split(f"[{chr(_MARK_BASE)}-{chr(_MARK_BASE + 0x0FFF)}]", v[max(0, k - 8):k])[-1]
-        after = re.split(f"[{chr(_MARK_BASE)}-{chr(_MARK_BASE + 0x0FFF)}]", v[k + 1:k + 9])[0]
+        before = re.split(f"[{chr(_MARK_BASE)}-{chr(_MARK_BASE + 0x0FFF)}]", v_plain[max(0, k - 8):k])[-1]
+        after = re.split(f"[{chr(_MARK_BASE)}-{chr(_MARK_BASE + 0x0FFF)}]", v_plain[k + 1:k + 9])[0]
         if len(before) < 3 or len(after) < 3:
             continue
-        for m in re.finditer(re.escape(before) + "(.{1,40}?)" + re.escape(after), p):
+        for m in re.finditer(re.escape(before) + "(.{1,40}?)" + re.escape(after), p_plain):
             votes[tok][m.group(1)] += 1
     r = Recovery()
     for tok in mark_to_token.values():
@@ -140,12 +280,12 @@ def recover(vadm_lines, pdf_path, dt):
                 r.conflicts[tok] = dict(votes[tok])
         else:
             r.missing.append(tok)
-    restored = "".join(r.found.get(mark_to_token.get(c), c) if c in mark_to_token else c for c in v)
+    restored = "".join(r.found.get(mark_to_token.get(c), c) if c in mark_to_token else c for c in v_plain)
     # 比べるときは空白を除く（行末の半角空白は行の外に出し、PDF に描かないことがある）
     pattern = "".join(r"\.*\d+" if piece == _TOC_FILL else re.escape(piece)
                       for piece in re.split(f"({_TOC_FILL})", _SPACE_RE.sub("", restored)) if piece)
     r.exact = (not r.missing and not r.conflicts
-               and re.fullmatch(pattern, _SPACE_RE.sub("", p), flags=re.S) is not None)
+               and re.fullmatch(pattern, _SPACE_RE.sub("", p_plain), flags=re.S) is not None)
     return r
 
 

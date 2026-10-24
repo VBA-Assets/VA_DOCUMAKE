@@ -1,4 +1,4 @@
-"""均等割付（{均等:5}原告{均等}。Word の均等割り付けと同じ。2026-10-24 班長指示）。"""
+"""均等割付（[原告]{5}。Word の均等割り付けと同じ。2026-10-24 班長指示）。"""
 from va_documake.doctypes import DOC_TYPES
 from va_documake.document import parse
 from va_documake.layout import Typesetter
@@ -13,21 +13,21 @@ def layout(src):
 
 
 def test_distribute_spreads_characters():
-    ts, paras, lines = layout(["{均等:5}原告{均等}甲野太郎", "{均等:5}原告代理人{均等}弁護士", "{均等：５}被告{均等:5}丙川",
-                               "{均等:2}長すぎる字{均等}はそのまま", "{均等:5}A1{均等}半角", "{均等:5}片方だけ", "{均等:5}{均等}空"])
+    ts, paras, lines = layout(["[原告]{5}甲野太郎", "[原告代理人]{5}弁護士", "[被告]{５}丙川",
+                               "[長すぎる字]{2}はそのまま", "[A1]{5}半角", "[片方だけ{5}", "[]{5}空"])
     x = [[(g.ch, round(g.x / ts.pitch, 3), g.index) for g in ln.glyphs] for ln in lines]
     assert x[0][:3] == [("原", 0, 0), ("告", 4, 1), ("甲", 5, 2)]          # 「原　　　告」の幅。次の字は5字目から
     assert [c for c, _, _ in x[1][:6]] == list("原告代理人弁") and x[1][5][1] == 5   # 字数どおりなら字の幅のまま
-    assert x[2][:3] == [("被", 0, 0), ("告", 4, 1), ("丙", 5, 2)]          # 全角の数字・終わりの字数も読む
+    assert x[2][:3] == [("被", 0, 0), ("告", 4, 1), ("丙", 5, 2)]          # 全角の数字も読む
     assert [g for g in x[3][:6]] == [(c, k, k) for k, c in enumerate("長すぎる字は")]   # はみ出すときは割り付けない
     assert x[4][:3] == [("A", 0, 0), ("1", 4.5, 1), ("半", 5, 2)]          # 半角は半字。最後の字が5字目の右端に来る
-    assert paras[5].text == "{均等:5}片方だけ" and paras[6].text == "{均等:5}{均等}空"   # 記号とみなさない
+    assert paras[5].text == "[片方だけ{5}" and paras[6].text == "[]{5}空"   # 記号とみなさない
 
 
 def test_distributed_text_is_not_broken_or_stretched():
     """割り付けた字の途中では改行せず、両端揃えでも中の字間は変えない。表のセルでも使える。"""
     head = "あ" * (DT.chars_lines[0] - 2)                                 # 4字の幅は1行目に入りきらない
-    ts, paras, lines = layout([head + "{均等:4}原告{均等}本文", "| {均等:6}原告{均等} | 金額 |", "|---|---|", "| 被告 | 1 |"])
+    ts, paras, lines = layout([head + "[原告]{4}本文", "| [原告]{6} | 金額 |", "|---|---|", "| 被告 | 1 |"])
     first, second = lines[0], lines[1]
     assert "原" not in [g.ch for g in first.glyphs] and [g.ch for g in second.glyphs][:2] == ["原", "告"]
     assert round((second.glyphs[1].x - second.glyphs[0].x) / ts.pitch, 3) == 3
@@ -40,7 +40,7 @@ def test_distributed_text_is_not_broken_or_stretched():
 def test_large_count_does_not_hang():
     """字数が1行（セル）の幅より大きくても止まらず、割り付ける幅は1行（セル）の幅までにする（2026-10-24、
     大きな字数を入れると画面が固まった）。"""
-    ts, paras, lines = layout(["# 見出し", "{均等:99}原告{均等}甲野太郎", "{イン:30}{均等:20}被告{均等}乙山", "| {均等:99}代理人{均等} | 金額 |",
+    ts, paras, lines = layout(["# 見出し", "[原告]{99}甲野太郎", "+30 [被告]{20}乙山", "| [代理人]{99} | 金額 |",
                                "|---|---|", "| 原告 | 1 |"])
     by = {}
     for ln in lines:

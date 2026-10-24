@@ -11,7 +11,7 @@ from tkinter import messagebox  # noqa: E402
 from va_documake import ai_ops, app, config, file_ops, theme, vadm  # noqa: E402
 from va_documake.pdfwriter import read_id  # noqa: E402
 
-TEXT = "原告　甲野太郎\n{表題}準備書面（１）\n# 認否\n甲野太郎の主張は争う。\n"
+TEXT = "原告　甲野太郎\n:=: 準備書面（１）\n# 認否\n甲野太郎の主張は争う。\n"
 PSEUDO = TEXT.replace("甲野太郎", "〔人名Ａ〕")      # エディターは常に仮名（2026-10-24 班長決定）
 
 
@@ -118,27 +118,27 @@ def test_editor_is_always_pseudonymized(window, monkeypatch):
 
 def test_align_and_line_marks(window):
     window.text.mark_set("insert", "4.0")
-    window.on_align("{右}")
-    assert window.text.get("4.0", "4.end") == "{右}〔人名Ａ〕の主張は争う。"
-    window.on_align("{中央}")
-    assert window.text.get("4.0", "4.end") == "{中央}〔人名Ａ〕の主張は争う。"
-    window.on_align("{中央}")   # 同じボタンをもう一度押すと解除する
+    window.on_align("--: ")
+    assert window.text.get("4.0", "4.end") == "--: 〔人名Ａ〕の主張は争う。"
+    window.on_align(":-: ")
+    assert window.text.get("4.0", "4.end") == ":-: 〔人名Ａ〕の主張は争う。"
+    window.on_align(":-: ")   # 同じボタンをもう一度押すと解除する
     assert window.text.get("4.0", "4.end") == "〔人名Ａ〕の主張は争う。"
     # 複数の行：すべてが同じ記号のときだけ解除し、そうでなければそろえる
     window.text.tag_add("sel", "2.0", "4.end")
-    window.on_align("{右}")
+    window.on_align("--: ")
     assert [window.text.get(f"{n}.0", f"{n}.end") for n in (2, 3, 4)] == \
-        ["{右}準備書面（１）", "{右}# 認否", "{右}〔人名Ａ〕の主張は争う。"]
-    window.on_align("{右}")
+        ["--: 準備書面（１）", "--: # 認否", "--: 〔人名Ａ〕の主張は争う。"]
+    window.on_align("--: ")
     assert [window.text.get(f"{n}.0", f"{n}.end") for n in (2, 3, 4)] == \
         ["準備書面（１）", "# 認否", "〔人名Ａ〕の主張は争う。"]
     window.text.edit_undo()      # Ctrl+Z 1回で、3行とも戻る
-    assert window.text.get("2.0", "2.end") == "{右}準備書面（１）"
+    assert window.text.get("2.0", "2.end") == "--: 準備書面（１）"
     window.text.tag_remove("sel", "1.0", "end")
     window.text.edit_undo()
     window.text.mark_set("insert", "4.0")
-    window.on_line_mark("{改ページ}")
-    assert window.text.get("4.0", "4.end") == "{改ページ}"
+    window.on_line_mark("<<<")
+    assert window.text.get("4.0", "4.end") == "<<<"
 
 
 def test_save_and_import(window, tmp_path, monkeypatch):
@@ -184,9 +184,21 @@ def test_paste_warns_about_removed_paragraphs_and_tokens(window, tmp_path, monke
     warned = []
     monkeypatch.setattr(messagebox, "showwarning", lambda *a, **k: warned.append(a[1]))
     sep = vadm.separator_line(window.session.doc_id, 1, window.session.settings)
-    monkeypatch.setattr(window, "clipboard_get", lambda: sep + "\n原告　〔人名Ａ〕\n{表題}準備書面（１）\n# 認否\n")
+    monkeypatch.setattr(window, "clipboard_get", lambda: sep + "\n原告　〔人名Ａ〕\n:=: 準備書面（１）\n# 認否\n")
     window.on_import()
     assert len(warned) == 1 and "消えた段落（1）" in warned[0] and "甲野太郎の主張は争う。" in warned[0]
+
+
+def test_paste_drops_ai_marker_lines(window, tmp_path, monkeypatch):
+    """AI の回答に混ざった内部の目印の行（<?thinking_complete?>）は、取り込むときに除き、状態の欄で知らせる。"""
+    window.session.pdf_path = tmp_path / "準備書面.pdf"
+    assert window.on_save()
+    body = window.raw_text().rstrip("\n")
+    sep = vadm.separator_line(window.session.doc_id, 1, window.session.settings)
+    monkeypatch.setattr(window, "clipboard_get", lambda: sep + "\n" + body + "\n<?thinking_complete?>\n")
+    window.on_import()
+    assert "<?thinking_complete?>" not in window.raw_text()
+    assert "AI の内部の目印と思われる行 1 行（<?thinking_complete?>）を除きました" in window.status.cget("text")
 
 
 def _change_outside(window, old, new):
@@ -467,15 +479,15 @@ def test_word_shortcuts(window, monkeypatch):
     window.text.focus_force()
     window.text.mark_set("insert", "4.2")
     window.text.event_generate("<Control-Key-e>")
-    assert _lines(window, 4, 4) == ["{中央}〔人名Ａ〕の主張は争う。"]
+    assert _lines(window, 4, 4) == [":-: 〔人名Ａ〕の主張は争う。"]
     window.text.event_generate("<Control-Key-e>")          # もう一度押すと解除（Word と同じ）
     assert _lines(window, 4, 4) == ["〔人名Ａ〕の主張は争う。"]
     window.text.event_generate("<Control-Key-r>")
-    assert _lines(window, 4, 4) == ["{右}〔人名Ａ〕の主張は争う。"]
+    assert _lines(window, 4, 4) == ["--: 〔人名Ａ〕の主張は争う。"]
     window.text.edit_undo()
     window.text.mark_set("insert", "4.0")
     window.text.event_generate("<Control-Return>")
-    assert _lines(window, 4, 5) == ["{改ページ}", "〔人名Ａ〕の主張は争う。"]
+    assert _lines(window, 4, 5) == ["<<<", "〔人名Ａ〕の主張は争う。"]
     # Tk のもとの Ctrl+O（改行を入れる）・Ctrl+K（行末まで消す）は働かない
     opened = []
     monkeypatch.setattr(window, "on_open", lambda: opened.append(True))
@@ -488,7 +500,7 @@ def test_word_shortcuts(window, monkeypatch):
 
 def test_outline_level_and_plain(window):
     """Alt+Shift+←／→ で見出しのレベルを上げ下げし、Ctrl+Shift+N で標準の本文にする（Word と同じ）。"""
-    window._load_text("# 第一\n## 第二\n本文\n- 項目\n{右}以上")
+    window._load_text("# 第一\n## 第二\n本文\n- 項目\n--: 以上")
     window.text.focus_force()
     window.text.mark_set("insert", "2.0")
     window.text.event_generate("<Alt-Shift-Left>")
@@ -510,47 +522,47 @@ def test_outline_level_and_plain(window):
     window.text.event_generate("<Alt-Shift-Right>")
     assert _lines(window, 1, 1) == ["九"]
     # Ctrl+Shift+N：選んだ行を標準の本文に（見出し・箇条書き・配置の記号を外す）。Ctrl+Z 1回で戻る
-    window._load_text("# 第一\n- 項目\n{右}以上\n1. 番号")
+    window._load_text("# 第一\n- 項目\n--: 以上\n1. 番号")
     window.text.tag_add("sel", "1.0", "4.end")
     window.text.event_generate("<Control-Shift-Key-N>")
     assert _lines(window, 1, 4) == ["第一", "項目", "以上", "番号"]
     window.text.edit_undo()
-    assert _lines(window, 1, 4) == ["# 第一", "- 項目", "{右}以上", "1. 番号"]
+    assert _lines(window, 1, 4) == ["# 第一", "- 項目", "--: 以上", "1. 番号"]
     window.text.tag_remove("sel", "1.0", "end")
 
 
 def test_marks_are_blue(window):
     """配置・改ページなどの記号は、青い字（確認表示の印と同じ色）で示す。記号として読まれない所は色を付けない。"""
-    window._load_text("{表題}準備書面\n本文に{右}と書いた\n{改ページ}\n| {中央}科目 | 金額 |\n|---|---|\n| a | b |")
+    window._load_text(":=: 準備書面\n本文に--: と書いた\n<<<\n| :-: 科目 | 金額 |\n|---|---|\n| a | b |")
     window._highlight()
     ranges = window.text.tag_ranges("mark")
     marked = [window.text.get(a, b) for a, b in zip(ranges[0::2], ranges[1::2])]
-    assert [m for m in marked if m.startswith("{")] == ["{表題}", "{改ページ}", "{中央}"]
+    assert [m for m in marked if m.strip() in (":=:", ":-:", "--:", "<<<")] == [":=: ", "<<<", ":-: "]
     assert window.text.tag_cget("mark", "foreground") == theme.ACCENT
 
 
 def test_markdown_marks_are_blue(window):
     """見出しの #・箇条書きの「- 」・段落番号の「1. 」・表の | と区切りの行も、同じ青い字で示す（読まれる所だけ）。"""
-    window._load_text("# 見出し\n- 項目\n1. 番号\n| A | B |\n|---|---|\n| a | b |\n{右}以上\n# 見出しにしない")
+    window._load_text("# 見出し\n- 項目\n1. 番号\n| A | B |\n|---|---|\n| a | b |\n--: 以上\n# 見出しにしない")
     window._highlight()
     ranges = window.text.tag_ranges("mark")
     marked = [window.text.get(a, b) for a, b in zip(ranges[0::2], ranges[1::2])]
-    assert marked == ["# ", "- ", "1. ", "|", "|", "|", "|---|---|", "|", "|", "|", "{右}"]
+    assert marked == ["# ", "- ", "1. ", "|", "|", "|", "|---|---|", "|", "|", "|", "--: "]
 
 
 def test_first_line_indent_button(window):
-    """［字下げ］：行頭に {字下} を付け、もう一度押すと外す。ほかの配置の記号とは付け替える。青い字で示す。"""
+    """［字下げ］：行頭に -> を付け、もう一度押すと外す。ほかの配置の記号とは付け替える。青い字で示す。"""
     window._load_text("前文\n# 見出し")
     window.text.mark_set("insert", "1.0")
-    window.on_align("{字下}")
-    assert _lines(window, 1, 1) == ["{字下}前文"]
-    window.on_align("{中央}")
-    assert _lines(window, 1, 1) == ["{中央}前文"]
-    window.on_align("{字下}")
+    window.on_align("-> ")
+    assert _lines(window, 1, 1) == ["-> 前文"]
+    window.on_align(":-: ")
+    assert _lines(window, 1, 1) == [":-: 前文"]
+    window.on_align("-> ")
     window._highlight()
     ranges = window.text.tag_ranges("mark")
-    assert "{字下}" in [window.text.get(a, b) for a, b in zip(ranges[0::2], ranges[1::2])]
-    window.on_align("{字下}")
+    assert "-> " in [window.text.get(a, b) for a, b in zip(ranges[0::2], ranges[1::2])]
+    window.on_align("-> ")
     assert _lines(window, 1, 1) == ["前文"]
 
 
@@ -661,7 +673,7 @@ def test_off_screen_geometry_is_ignored():
 
 
 def test_toc_button_and_preview_link(window):
-    """［目次］：カーソルの行の前に {目次:3} を入れ（段数は手で直す。2026-10-24 班長指示）、青い字で示す。
+    """［目次］：カーソルの行の前に [TOC:3] を入れ（段数は手で直す。2026-10-24 班長指示）、青い字で示す。
     目次の行をクリックしても連動が崩れない。"""
     window._load_text("# 第一\n本文\n# 第二\n本文")
     window.text.mark_set("insert", "1.0")
@@ -673,12 +685,12 @@ def test_toc_button_and_preview_link(window):
                 yield c
             yield from buttons(c)
     next(b for b in buttons(window.ribbon) if str(b.cget("text")) == "目次").invoke()
-    assert _lines(window, 1, 2) == ["{目次:3}", "# 第一"]
+    assert _lines(window, 1, 2) == ["[TOC:3]", "# 第一"]
     window.refresh()
     ranges = window.text.tag_ranges("mark")
-    assert "{目次:3}" in [window.text.get(a, b) for a, b in zip(ranges[0::2], ranges[1::2])]
+    assert "[TOC:3]" in [window.text.get(a, b) for a, b in zip(ranges[0::2], ranges[1::2])]
     m = window.session.layout_map
-    page, x, top, h = m.locate(0, 0)          # {目次} の行 → 目次の1行目
+    page, x, top, h = m.locate(0, 0)          # [TOC] の行 → 目次の1行目
     assert page == 0
     assert m.hit(page, x + 1, top + h / 2)[0] == 0
 
@@ -743,18 +755,18 @@ def test_bold_on_heading_line_applies_to_same_level(window):
     assert window.raw_text().startswith("本文。")
 
 def test_marks_wrapped_in_bold_in_editor(window):
-    """「**{表題}準備書面**」の記号も青く示し、［中央］で付け替えられる。AI の回答で太字に囲まれても、
+    """「**:=: 準備書面**」の記号も青く示し、［中央］で付け替えられる。AI の回答で太字に囲まれても、
     記号が消えたとはみなさない（2026-10-24 班長指示）。"""
-    window._load_text("**{表題}準備書面（１）**\n# 認否\n")
+    window._load_text("**:=: 準備書面（１）**\n# 認否\n")
     window._highlight()
-    # 「**」「{表題}」は青、「準備書面」は青でない（太字）
+    # 「**」「:=: 」は青、「準備書面」は青でない（太字）
     assert all("mark" in window.text.tag_names(f"1.{c}") for c in range(6))
     assert "mark" not in window.text.tag_names("1.6") and "bold" in window.text.tag_names("1.6")
     window.text.mark_set("insert", "1.5")
-    window.on_align("{中央}")
-    assert window.text.get("1.0", "1.end") == "{中央}**準備書面（１）**"
-    r = vadm.review(vadm.parse_text("==== VA DocuMake 文書ID K7Q29XMD 版 1 ====\n**{表題}準備書面**\n"),
-                     "K7Q29XMD", 1, ["{表題}準備書面"], window.session.dictionary)
+    window.on_align(":-: ")
+    assert window.text.get("1.0", "1.end") == ":-: **準備書面（１）**"
+    r = vadm.review(vadm.parse_text("==== VA DocuMake 文書ID K7Q29XMD 版 1 ====\n**:=: 準備書面**\n"),
+                     "K7Q29XMD", 1, [":=: 準備書面"], window.session.dictionary)
     assert not r.lost_marks
 
 
@@ -794,26 +806,26 @@ def test_dots_button_with_bold(window):
 
 
 def test_indent_button_and_shortcuts(window):
-    """［インデント］（Ctrl+I）で {イン:1} を付け、もう一度で外す（字数は手で直す）。字下げと一緒に使え、
+    """［インデント］（Ctrl+I）で +1 を付け、もう一度で外す（字数は手で直す）。字下げと一緒に使え、
     見出しの行には付けない。Ctrl+I でタブは入らない（2026-10-24 班長指示）。"""
     window._load_text("# 認否\n主張は争う。\n次の段落。\n")
     window.text.tag_add("sel", "2.0", "3.end")
     window.on_indent()
-    assert window.raw_text().split("\n")[1:3] == ["{イン:1}主張は争う。", "{イン:1}次の段落。"]
+    assert window.raw_text().split("\n")[1:3] == ["+1 主張は争う。", "+1 次の段落。"]
     window.on_indent()                                   # もう一度で外す（選択は残る）
     assert window.raw_text().split("\n")[1:3] == ["主張は争う。", "次の段落。"]
     window.text.tag_remove("sel", "1.0", "end")
-    window._load_text("# 認否\n{イン:3}主張は争う。\n次の段落。\n")
+    window._load_text("# 認否\n+3 主張は争う。\n次の段落。\n")
     window.text.tag_add("sel", "2.0", "3.end")           # 一部の行に記号があれば、ない行に付ける（字数は変えない）
     window.on_indent()
-    assert window.raw_text().split("\n")[1:3] == ["{イン:3}主張は争う。", "{イン:1}次の段落。"]
+    assert window.raw_text().split("\n")[1:3] == ["+3 主張は争う。", "+1 次の段落。"]
     window.text.tag_remove("sel", "1.0", "end")
     window.text.mark_set("insert", "2.5")
-    window.on_align("{字下}")                            # 字下げと一緒に使える（インデントは残る）
-    assert window.text.get("2.0", "2.end") == "{イン:3}{字下}主張は争う。"
-    window.on_align("{中央}")                            # 配置と字下げは付け替え、インデントは残す
-    assert window.text.get("2.0", "2.end") == "{中央}{イン:3}主張は争う。"
-    window.on_align("{中央}")
+    window.on_align("-> ")                            # 字下げと一緒に使える（インデントは残る）
+    assert window.text.get("2.0", "2.end") == "+3 -> 主張は争う。"
+    window.on_align(":-: ")                            # 配置と字下げは付け替え、インデントは残す
+    assert window.text.get("2.0", "2.end") == ":-: +3 主張は争う。"
+    window.on_align(":-: ")
     window.text.mark_set("insert", "1.1")
     window.on_indent()                                   # 見出しの行には付けない
     assert window.text.get("1.0", "1.end") == "# 認否"
@@ -821,69 +833,70 @@ def test_indent_button_and_shortcuts(window):
     window.text.event_generate("<Control-Key-i>")
     assert window.text.get("3.0", "3.end") == "次の段落。"         # Ctrl+I で外れる。タブは入らない
     window.text.event_generate("<Control-Key-i>")
-    assert window.text.get("3.0", "3.end") == "{イン:1}次の段落。"
+    assert window.text.get("3.0", "3.end") == "+1 次の段落。"
     window._highlight()
-    assert all("mark" in window.text.tag_names(f"3.{c}") for c in range(6))
+    assert all("mark" in window.text.tag_names(f"3.{c}") for c in range(3))
     window.on_plain()                                    # 標準（Ctrl+Shift+N）で記号を外す
     assert window.text.get("3.0", "3.end") == "次の段落。"
 
 def test_distribute_button(window):
-    """［均等割付］で選んだ字を {均等:N}…{均等} で挟み（N は選んだ字の数。手で直す）、もう一度で外す。"""
+    """［均等割付］で選んだ字を [字]{N} の形で挟み（N は選んだ字の数。手で直す）、もう一度で外す。"""
     window._load_text("原告甲野太郎\n")
     window.text.tag_add("sel", "1.0", "1.2")
     window.on_distribute()
-    assert window.text.get("1.0", "1.end") == "{均等:2}原告{均等}〔人名Ａ〕"
+    assert window.text.get("1.0", "1.end") == "[原告]{2}〔人名Ａ〕"
     assert window.text.get("sel.first", "sel.last") == "原告"
     window._highlight()
-    assert all("mark" in window.text.tag_names(f"1.{c}") for c in range(6))
+    assert all("mark" in window.text.tag_names(f"1.{c}") for c in (0, 3, 4, 5, 6))       # 「[」と「]{2}」
+    assert "mark" not in window.text.tag_names("1.1")
     window.on_distribute()
     assert window.text.get("1.0", "1.end") == "原告〔人名Ａ〕"
     window.text.edit_undo()
-    assert window.text.get("1.0", "1.end") == "{均等:2}原告{均等}〔人名Ａ〕"
+    assert window.text.get("1.0", "1.end") == "[原告]{2}〔人名Ａ〕"
 
 
 def test_align_and_distribute_buttons_in_table_cells(window):
     """表のセルでは、［中央］［右］がセルの先頭の配置の記号を、［均等割付］がセルの字全体を挟む記号を付け外しする。
     区切りの行では列の配置を変える（2026-10-24 班長指示）。"""
-    window._load_text("| 項目 | 金額 |\n|---|---|\n| 休業損害 | {中央}1,000 |\n本文。\n")
+    window._load_text("| 項目 | 金額 |\n|---|---|\n| 休業損害 | :-: 1,000 |\n本文。\n")
 
     def lines():
         return window.raw_text().split("\n")[:4]
     window.text.mark_set("insert", "1.4")                 # 「項目」のセル
-    window.on_align("{右}")
-    assert lines()[0] == "| {右}項目 | 金額 |"
-    window.on_align("{右}")                               # もう一度で外す
+    window.on_align("--: ")
+    assert lines()[0] == "| --: 項目 | 金額 |"
+    window.on_align("--: ")                               # もう一度で外す
     assert lines()[0] == "| 項目 | 金額 |"
-    window.text.mark_set("insert", "3.13")                # 「1,000」のセル：{中央} を {右} に付け替える
-    window.on_align("{右}")
-    assert lines()[2] == "| 休業損害 | {右}1,000 |"
+    window.text.mark_set("insert", "3.13")                # 「1,000」のセル：:-: を --: に付け替える
+    window.on_align("--: ")
+    assert lines()[2] == "| 休業損害 | --: 1,000 |"
     window.text.tag_add("sel", "1.2", "3.4")              # 選んだ範囲にかかるセル（区切りの行は除く）
-    window.on_align("{中央}")
-    assert lines()[0] == "| {中央}項目 | {中央}金額 |" and lines()[1] == "|---|---|"
-    assert lines()[2] == "| {中央}休業損害 | {右}1,000 |"
+    window.on_align(":-: ")
+    assert lines()[0] == "| :-: 項目 | :-: 金額 |" and lines()[1] == "|---|---|"
+    assert lines()[2] == "| :-: 休業損害 | --: 1,000 |"
     window.text.edit_undo()                               # Ctrl+Z 1回で戻る
     assert lines()[0] == "| 項目 | 金額 |"
     window.text.tag_remove("sel", "1.0", "end")
     window.text.mark_set("insert", "3.4")                 # 均等割付：セルの字全体を挟む・外す
     window.on_distribute()
-    assert lines()[2] == "| {均等:4}休業損害{均等} | {右}1,000 |"
+    assert lines()[2] == "| [休業損害]{4} | --: 1,000 |"
     window.text.tag_remove("sel", "1.0", "end")
     window.text.mark_set("insert", "3.6")
     window.on_distribute()
-    assert lines()[2] == "| 休業損害 | {右}1,000 |"
+    assert lines()[2] == "| 休業損害 | --: 1,000 |"
     window.text.mark_set("insert", "3.14")                # 配置の記号の後から挟む
     window.on_distribute()
-    assert lines()[2] == "| 休業損害 | {右}{均等:3}1,000{均等} |"
+    assert lines()[2] == "| 休業損害 | --: [1,000]{3} |"
     window.text.tag_remove("sel", "1.0", "end")
     window.text.mark_set("insert", "3.end")               # 最後の | の後なら、最後のセル
-    window.on_align("{中央}")
-    assert lines()[2] == "| 休業損害 | {中央}{均等:3}1,000{均等} |"
+    window.on_align(":-: ")
+    assert lines()[2] == "| 休業損害 | :-: [1,000]{3} |"
     window.text.mark_set("insert", "2.2")                 # 区切りの行では、その列の配置を変える
-    window.on_align("{右}")
+    window.on_align("--: ")
     assert lines()[1] == "|---:|---|"
     window.text.mark_set("insert", "4.1")                 # 表の外の行は、これまでどおり段落の配置
-    window.on_align("{右}")
-    assert lines()[3] == "{右}本文。"
+    window.on_align("--: ")
+    assert lines()[3] == "--: 本文。"
 
 
 def test_align_buttons_on_separator_row_change_column(window):
@@ -894,19 +907,19 @@ def test_align_buttons_on_separator_row_change_column(window):
     def sep():
         return window.raw_text().split("\n")[1]
     window.text.mark_set("insert", "2.6")                 # 2列目
-    window.on_align("{右}")
+    window.on_align("--: ")
     assert sep() == "|===|===:|"
-    window.on_align("{中央}")
+    window.on_align(":-: ")
     assert sep() == "|===|:===:|"
-    window.on_align("{中央}")                             # もう一度で左に戻す
+    window.on_align(":-: ")                             # もう一度で左に戻す
     assert sep() == "|===|===|"
     window.text.tag_add("sel", "2.0", "2.end")            # 選んだ範囲にかかる列をまとめて
-    window.on_align("{中央}")
+    window.on_align(":-: ")
     assert sep() == "|:===:|:===:|"
     window.text.edit_undo()
     assert sep() == "|===|===|"
     from va_documake.document import CENTER, parse_separator
-    window.on_align("{中央}")
+    window.on_align(":-: ")
     assert parse_separator(sep()) == ([CENTER, CENTER], True)       # 2重線のまま
 
 

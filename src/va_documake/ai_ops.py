@@ -194,6 +194,9 @@ class AiMixin:
             notes.append(f"消えた段落 {len(r.removed)}")
         if r.older:
             notes.append(f"前の版（版 {content.version}）をもとにした回答")
+        if content.dropped:
+            # AI の画面が混ぜた内部の目印の行は、除いて知らせる（2026-10-25 班長決定）
+            notes.append(f"AI の内部の目印と思われる行 {len(content.dropped)} 行（{content.dropped[0]}）を除きました")
         head = f"AI の{origin}を取り込み、版 {self.session.version} を保存しました。" if saved else \
             f"AI の{origin}を取り込みました（まだ保存していません）。"
         self.status.configure(text=head + "　" + "、".join(notes) + "。Ctrl+Z で取り込む前に戻せます。")

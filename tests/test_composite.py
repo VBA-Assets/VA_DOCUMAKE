@@ -7,7 +7,7 @@ from va_documake.session import Session
 
 DT = DOC_TYPES["Saiban"]
 LONG = "当事者は、長い見出しを折り返すと、２行目はまとめた段の数だけ右から始まる。"
-SRC = ["{目次}", "#", "## " + LONG, "本文。", "## 請求の原因", "#", "##", "### 三段まとめ", "本文。"]
+SRC = ["[TOC]", "#", "## " + LONG, "本文。", "## 請求の原因", "#", "##", "### 三段まとめ", "本文。"]
 
 
 def lines_by_para(src, dt=DT):
@@ -39,7 +39,7 @@ def test_composite_heading_in_toc():
     assert toc[0].startswith("第１　１ 当事者")
     assert any(t.startswith("２ 請求の原因") for t in toc) and any(t.startswith("第２　１　(1) 三段まとめ") for t in toc)
     assert by[0][0].glyphs[0].x == 0                                    # 第１の段の位置
-    _, paras1, by1 = lines_by_para(["{目次:1}", "#", "## まとめた見出し", "## 載せない"])
+    _, paras1, by1 = lines_by_para(["[TOC:1]", "#", "## まとめた見出し", "## 載せない"])
     assert ["".join(g.ch for g in ln.glyphs if not g.is_number) for ln in by1[0]] == ["第１　１ まとめた見出し"]
 
 

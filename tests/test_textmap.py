@@ -58,7 +58,7 @@ def test_cleanup_keeps_positions():
 
 
 def test_table_cells():
-    text = "# 損害\n| 項目 | {右}金額 |\n|---|---:|\n| 休業損害 | 1,080,000 |\n本文"
+    text = "# 損害\n| 項目 | --: 金額 |\n|---|---:|\n| 休業損害 | 1,080,000 |\n本文"
     m = session_for(text)
     line3 = text.splitlines()[3]
     page, x, top, h = m.locate(3, line3.index("1,080"))
@@ -101,7 +101,7 @@ def test_heading_wrapped_in_bold_round_trips():
         assert round_trip(m, 0, line.index(ch)) == (0, line.index(ch))
 
 def test_marks_wrapped_in_bold_round_trip():
-    text = "**{表題}準備書面（１）**\n# 認否\n| 項目 | 金額 |\n|---|---|\n| 休業損害 | **{右}1,000** |"
+    text = "**:=: 準備書面（１）**\n# 認否\n| 項目 | 金額 |\n|---|---|\n| 休業損害 | **--: 1,000** |"
     m = session_for(text)
     line = text.splitlines()[0]
     for ch in "準）":
@@ -124,7 +124,7 @@ def test_highlight_marks_keep_positions():
 
 
 def test_indent_marks_round_trip():
-    text = "# 認否\n{イン:3}{字下}インデントの段落。"
+    text = "# 認否\n+3 -> インデントの段落。"
     m = session_for(text)
     line = text.splitlines()[1]
     for ch in "イ段。":
@@ -132,7 +132,7 @@ def test_indent_marks_round_trip():
 
 
 def test_distribute_marks_round_trip():
-    text = "{均等:5}原告{均等}甲野太郎"
+    text = "[原告]{5}甲野太郎"
     m = session_for(text)
     for ch in "原告甲郎":
         assert round_trip(m, 0, text.index(ch)) == (0, text.index(ch)), ch

@@ -152,7 +152,7 @@ class LayoutMap:
         seps = [s for s in cell_separators(text) if s >= start]
         seg = text[start:seps[0] if seps else len(text)].rstrip(" 　")
         plain, _, _, cols = split_inline(seg)
-        # 「**{右}金額**」は、配置の記号が太字（蛍光ペン）の記号の内側にある（セルの字は記号の後から）
+        # 「**--: 金額**」は、配置の記号が太字（蛍光ペン）の記号の内側にある（セルの字は記号の後から）
         skip = next((len(m) for m in CELL_ALIGNS if leading_wrap(seg) and plain.startswith(m)), 0)
         return self._orig(line, start + cols[min(g.index + skip, len(cols) - 1)])
 

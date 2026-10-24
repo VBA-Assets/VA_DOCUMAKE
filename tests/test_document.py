@@ -1,7 +1,7 @@
 """マークダウンの読み取り（仕様.md の5）。"""
 from va_documake.doctypes import DOC_TYPES
 from va_documake.document import (BLANK, BODY, BULLET, CENTER, HEADING, NUMBER, PAGE_BREAK, RIGHT,
-                                      SECTION_BREAK, TITLE, parse)
+                                      SECTION_BREAK, TITLE, TOC, parse)
 from va_documake.layout import Typesetter
 
 SAIBAN = DOC_TYPES["Saiban"]
@@ -19,15 +19,29 @@ def test_marks_need_space():
 
 
 def test_align_marks():
-    ps = parse(["{表題}準備書面", "{右}以上", "{中央}記", "{左}本文"], SAIBAN)
+    ps = parse([":=: 準備書面", "--: 以上", ":-: 記", ":-- 本文"], SAIBAN)
     assert [p.align for p in ps] == [TITLE, RIGHT, CENTER, "justify"]
     assert [p.text for p in ps] == ["準備書面", "以上", "記", "本文"]
 
 
 def test_line_marks():
     # 空の行は、Word の空の段落と同じく1行の空き（2026-10-23 班長決定）
-    ps = parse(["前", "", "{改ページ}", "{セクション区切り}", "後"], SAIBAN)
+    ps = parse(["前", "", "<<<", "<<<=", "後"], SAIBAN)
     assert [p.kind for p in ps] == [BODY, BLANK, PAGE_BREAK, SECTION_BREAK, BODY]
+
+
+def test_symbol_marks_need_space_or_line_end():
+    """記号で表す行頭の記号（2026-10-25 班長決定）も、後ろに半角空白があるときだけ記号とする（行末なら空白は
+    なくてよい）。電話番号の「+81 3-…」、箇条書きに似た「+ 」、行の途中の記号は、字のまま残す。"""
+    ps = parse([":=:準備書面", "--:", "->前文", "+2本文", "+81 3-1234-5678", "+ 項目", "＋２ 全角", "+2 1. 番号にしない",
+                "<<<<", "<<< 改ページ", "[toc]", "[TOC：２]", "[目次]"], SAIBAN)
+    assert [(p.align, p.text) for p in ps[:1]] == [("justify", ":=:準備書面")]
+    assert (ps[1].align, ps[1].text) == (RIGHT, "")                 # 中身のない右揃えの行
+    assert [p.text for p in ps[2:6]] == ["->前文", "+2本文", "+81 3-1234-5678", "+ 項目"]
+    assert [p.left_indent for p in ps[2:8]] == [None, None, None, None, 2, 2]
+    assert ps[6].text == "全角" and ps[7].text == "1. 番号にしない" and ps[7].kind == BODY
+    assert [p.kind for p in ps[8:]] == [BODY, BODY, TOC, TOC, BODY]
+    assert [p.level for p in ps[10:12]] == [3, 2]
 
 
 def test_leading_space_becomes_indent_before_first_heading():
@@ -40,7 +54,7 @@ def test_leading_space_becomes_indent_before_first_heading():
 
 def test_stop_after_right_aligned():
     """見出しの後に右揃えの段落が来たら、次のセクション区切りまで変換しない（VA公用文と同じ）。"""
-    ps = parse(["# 主張", "本文", "{右}以上", "# 別紙の見出し", "- 項目", "{セクション区切り}", "# 新しい見出し"],
+    ps = parse(["# 主張", "本文", "--: 以上", "# 別紙の見出し", "- 項目", "<<<=", "# 新しい見出し"],
                SAIBAN)
     assert [(p.kind, p.text, p.body_level) for p in ps[3:5]] == [(BODY, "# 別紙の見出し", 0), (BODY, "- 項目", 0)]
     # セクション区切りの後は、変換を再開し、番号を第１から振り直す
@@ -48,13 +62,13 @@ def test_stop_after_right_aligned():
 
 
 def test_page_break_keeps_numbering():
-    ps = parse(["# 一", "{改ページ}", "# 二"], SAIBAN)
+    ps = parse(["# 一", "<<<", "# 二"], SAIBAN)
     assert [p.number for p in ps if p.kind == HEADING] == ["第１　", "第２　"]
 
 
 def test_layout_page_and_section_breaks_and_blank():
     ts = Typesetter(SAIBAN)
-    lines = ts.layout(parse(["一", "", "二", "{改ページ}", "三", "{改ページ}", "{セクション区切り}", "四"],
+    lines = ts.layout(parse(["一", "", "二", "<<<", "三", "<<<", "<<<=", "四"],
                             SAIBAN))
     assert [(ln.page, ln.row, "".join(g.ch for g in ln.glyphs)) for ln in lines] == [
         (1, 0, "一"), (1, 2, "二"), (2, 0, "三"), (3, 0, "四")]
@@ -67,9 +81,9 @@ def test_leading_space_indent_in_layout():
 
 
 def test_empty_aligned_line_takes_a_row_and_stops_conversion():
-    """{右} だけの行は、Word の空の右揃えの段落と同じく1行使い、そこから先は変換しない（VA公用文と同じ）。"""
+    """--: だけの行は、Word の空の右揃えの段落と同じく1行使い、そこから先は変換しない（VA公用文と同じ）。"""
     ts = Typesetter(SAIBAN)
-    ps = parse(["# 認否", "認める。", "{右}", "別紙", "# 見出しにしない"], SAIBAN)
+    ps = parse(["# 認否", "認める。", "--: ", "別紙", "# 見出しにしない"], SAIBAN)
     assert [(p.kind, p.text, p.body_level) for p in ps[3:]] == [(BODY, "別紙", 0), (BODY, "# 見出しにしない", 0)]
     lines = ts.layout(ps)
     assert [(ln.row, "".join(g.ch for g in ln.glyphs)) for ln in lines] == [
@@ -77,16 +91,16 @@ def test_empty_aligned_line_takes_a_row_and_stops_conversion():
 
 
 def test_first_line_indent_mark():
-    """{字下}：最初の見出しより前の段落の1行目だけを1字下げる（全角スペースを使わない。2026-10-23 班長指示）。"""
+    """-> ：最初の見出しより前の段落の1行目だけを1字下げる（全角スペースを使わない。2026-10-23 班長指示）。"""
     ts = Typesetter(SAIBAN)
     long = "前文" * 40
-    ps = parse(["{字下}" + long, "# 見出し", "本文", "{字下}別紙", "# 見出しにしない", "{セクション区切り}", "# 新しい見出し"],
+    ps = parse(["-> " + long, "# 見出し", "本文", "-> 別紙", "# 見出しにしない", "<<<=", "# 新しい見出し"],
                SAIBAN)
     assert (ps[0].text, ps[0].first_indent) == (long, 1)
     lines = ts.layout(ps)
     first, second = lines[0], lines[1]
     assert first.glyphs[0].x == ts.pitch and second.glyphs[0].x == 0
-    # 見出しの後の {字下} は、右揃えの段落と同じく、その段落から先の変換を止める（その段落は1字下げ）
+    # 見出しの後の -> は、右揃えの段落と同じく、その段落から先の変換を止める（その段落は1字下げ）
     assert ps[2].body_level == 1
     assert (ps[3].kind, ps[3].text, ps[3].body_level, ps[3].first_indent) == (BODY, "別紙", 0, 1)
     assert (ps[4].kind, ps[4].text) == (BODY, "# 見出しにしない")

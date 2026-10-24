@@ -4,6 +4,7 @@
 ・実名・文書の名前・フォルダのパスは書かない。ファイル名は「<文書ID>.vadm」とする。
 ・AI の回答は、区切りの行から下を1つのコードブロックで返させる。読み込むときは、区切りの行より上
   （AI への指示、AI の前置き）と、コードブロックの閉じの記号から下（AI の結び）を捨てる。
+・AI の画面が回答に混ぜる内部の目印の行（「<?thinking_complete?>」だけの行）は、読み込むときに除く（Content.dropped）。
 """
 import difflib
 import os
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .doctypes import DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_LABELS
-from .document import (INDENT_MARK, LEAD_ALIGN_MARKS, LEFT_INDENT_RE, is_line_mark, move_wraps_after_marks,
+from .document import (INDENT_MARK, cell_align_mark, is_line_mark, move_wraps_after_marks, parse_separator, split_cells,
                        split_lead_marks)
 from .pseudonym import tokens_in
 
@@ -25,6 +26,9 @@ DOC_ID_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 DOC_ID_LENGTH = 8
 SEPARATOR_RE = re.compile(r"^\s*={2,}\s*VA\s*DocuMake\s+文書ID\s+([0-9A-Z]+)\s+版\s+(\d+)(.*?)\s*={2,}\s*$")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# AI の画面が回答のコードブロックに混ぜる、内部の目印の行（2026-10-25 の往復試験で claude.ai が「<?thinking_complete?>」を
+# 混ぜた）。取り込むときに除き、除いたことを知らせる（2026-10-25 班長決定）
+AI_MARKER_RE = re.compile(r"^\s*<\?[A-Za-z_][\w:.-]*\?>\s*$")
 
 
 PROMPT = """このファイルは、ツール「VA DocuMake」の構文ファイル（AI に渡すために、実名を記号に置き換えたもの）です。「==== VA DocuMake」で始まる区切りの行より上は AI への指示、下は編集する文書です。
@@ -32,7 +36,7 @@ PROMPT = """このファイルは、ツール「VA DocuMake」の構文ファイ
 1　状況
 私は、法律事務所などで使う文書を、ツール「VA DocuMake」で作っている。VA DocuMakeは、区切りの行より下のマークダウンを読み込み、見出しの番号・インデント・配置を自動で付けて、裁判所提出書類などの書式の PDF に組む。
 依頼者などの実名を AI に渡さないため、人名・法人名・地名・番号などは、〔人名Ａ〕〔法人Ａ〕〔地名Ａ〕〔番号Ａ〕〔その他Ａ〕のような記号に置き換えてある。同じ記号は、文書のどこでも同じ語を表す。VA DocuMakeは、あなたの回答を取り込むときに、記号を文字どおりに探して元の語に戻す。記号が少しでも変わると（括弧が［］や()に変わる、英字が変わる、「同人」「同社」に言い換えられる）、その部分は元に戻らない。
-行の先頭の {表題} {中央} {右} {左} は配置の記号、{字下} は段落の1行目を1字下げる記号（見出しの後に使うと、そこから先は見出しの番号・インデントを付けない）、{イン:2} は段落の左インデントを全角2字にする記号（数字が字数）、その行だけを書いた {改ページ} {セクション区切り} は改ページの記号、{目次} は目次を組む位置の記号である（{目次:2} のように、載せる見出しの段を書き添えることがある）。**語** は太字（ゴシック体）の記号、*語* は傍点（字の上の点）の記号、{均等:5}語{均等} は語を5字の幅に均等に割り付ける記号、==語== は私が画面で付けた目印（蛍光ペン。PDF には出ない）である。空の行は、そのまま1行の空きになる。VA DocuMakeは、この記号で表題・中央揃え・右揃え・改ページなどを決める。記号が消えると、配置が失われる。
+行の先頭の「:=: 」は表題、「:-: 」は中央揃え、「--: 」は右揃え、「:-- 」は左揃えの記号（マークダウンの表の区切りの行と同じく、コロンのある側に寄せる。記号の後に半角空白を1つ置く）、「-> 」は段落の1行目を1字下げる記号（見出しの後に使うと、そこから先は見出しの番号・インデントを付けない）、「+2 」は段落の左インデントを全角2字にする記号（数字が字数）である。表のセルの先頭の「:-: 」「--: 」「:-- 」も、そのセルの配置の記号である。その行だけを書いた <<< は改ページ、<<<= はセクション区切り（改ページして見出しの番号を振り直す）、[TOC] は目次を組む位置の記号である（[TOC:2] のように、載せる見出しの段を書き添えることがある）。**語** は太字（ゴシック体）の記号、*語* は傍点（字の上の点）の記号、[語]{5} は語を5字の幅に均等に割り付ける記号、==語== は私が画面で付けた目印（蛍光ペン。PDF には出ない）である。空の行は、そのまま1行の空きになる。VA DocuMakeは、この記号で表題・中央揃え・右揃え・改ページなどを決める。記号が消えると、配置が失われる。
 区切りの行には、文書ID・版と、文書の種類などの設定が書いてある。VA DocuMakeは、回答の最初の行にある区切りの行で、どの文書のどの版をもとにした回答かを確かめる。区切りの行がないと、回答を取り込めない。
 
 2　任務
@@ -41,11 +45,11 @@ VA DocuMakeに取り込ませるだけで、実名に戻った文書が正しい
 3　実行
 必ず達成すること：
 ・記号（〔人名Ａ〕など）は、括弧と英字を含めて一字も変えずに書く。言い換えない。新しい記号を作らない。記号の中身を推測しない。
-・配置の記号（{表題} {中央} {右} {左} {字下} {イン:2} など）と、改ページの記号（{改ページ} {セクション区切り}）、目次の記号（{目次} {目次:2} など）は、元の行にそのまま残す。新しく付けるのは、私が求めたときだけとする。
+・配置の記号（:=: :-: --: :-- -> +2 など）と、改ページの記号（<<< <<<=）、目次の記号（[TOC] [TOC:2] など）は、元の行にそのまま残す（記号の後の半角空白も残す）。新しく付けるのは、私が求めたときだけとする。
 ・空行を入れない。元の文書にある空の行は、そのまま残す（空の行は、PDF で1行の空きになる）。
 ・見出しは # の数で階層を表す（# が第１、## が１、### が(1)…）。見出しに番号を書かない。# だけの行のすぐ後に見出しを書くと、2つの見出しを1行にまとめる（「第１　１　当事者」。複合見出し）。表題・日付・宛先など、最初の見出しより前の行には # を付けない。
 ・表は、| で列を区切るマークダウンの表で書く。2行目の - = : や、セルの先頭の配置の記号は、私が求めたときを除き、変えない。見出しの行の下を2重線にするときは、2行目のすべての列の - を = にする（|===|===|）。
-・太字は **語**、傍点は *語* で書く（太字と傍点を重ねると ***語***）。元の文書の太字・傍点の記号は残し、新しく付けるのは、私が求めたときだけとする。蛍光ペンの記号（==語==）と均等割付の記号（{均等:5}語{均等}）は、私が求めたときを除き、付け外ししない。斜体・水平線・引用・リンク・HTML タグを使わない。1つの段落は1行に書き、段落の途中で改行しない。
+・太字は **語**、傍点は *語* で書く（太字と傍点を重ねると ***語***）。元の文書の太字・傍点の記号は残し、新しく付けるのは、私が求めたときだけとする。蛍光ペンの記号（==語==）と均等割付の記号（[語]{5}）は、私が求めたときを除き、付け外ししない。斜体・水平線・引用・リンク・HTML タグを使わない。1つの段落は1行に書き、段落の途中で改行しない。
 ・依頼が文書の書き直しである場合は、依頼した箇所以外の文字を変えない（要約・言い換えをしない）。
 最終状態：回答を VA DocuMakeに取り込むと、記号がすべて実名に戻り、配置と見出しの階層が元の文書と同じに保たれている。
 
@@ -82,6 +86,7 @@ class Content:
     settings: Settings = None     # 区切りの行に設定がなければ None
     body: list = field(default_factory=list)   # 文書の行（記号入り）
     prompt: str = None            # AI への指示の部分（なければ None。AI の回答で上書きしたファイルなど）
+    dropped: list = field(default_factory=list)   # 除いた AI の内部の目印の行（「<?thinking_complete?>」など）
 
     @property
     def body_text(self):
@@ -169,17 +174,20 @@ def parse_text(text):
     if at is None:
         raise NoSeparator("区切りの行（「==== VA DocuMake 文書ID …」の行）が見つかりません。")
     doc_id, version, settings = parse_separator(lines[at])
-    body = []
+    body, dropped = [], []
     for ln in lines[at + 1:]:
         if FENCE_RE.match(ln):    # コードブロックの閉じの記号。ここから下は AI の結びの文
             break
+        if AI_MARKER_RE.match(ln):
+            dropped.append(ln.strip())
+            continue
         body.append(ln.rstrip())
     while body and not body[-1].strip():
         body.pop()
     while body and not body[0].strip():
         body.pop(0)
     prompt = "\n".join(lines[:at]).rstrip() + "\n" if is_prompt(lines[:at]) else None
-    return Content(doc_id, version, settings, body, prompt)
+    return Content(doc_id, version, settings, body, prompt, dropped)
 
 
 def read_file(path):
@@ -226,13 +234,17 @@ def _marks(lines):
         if is_line_mark(s):
             out.append((s, ln))
             continue
+        if s.startswith("|"):
+            # 表のセルの配置の記号（区切りの行の : は比べない）
+            if parse_separator(s) is None:
+                out += [(m.strip(), ln) for m in map(cell_align_mark, split_cells(s)) if m]
+            continue
         align, left, first, _ = split_lead_marks(move_wraps_after_marks(ln))
         if left:
-            out.append((LEFT_INDENT_RE.sub("{イン}", left), ln))     # 字数は比べない（直してよい）
-        for m in LEAD_ALIGN_MARKS:
-            if m in (align, INDENT_MARK if first else None) or (s.startswith("|") and m in ln):
-                out.append((m, ln))
-                break
+            out.append(("+N", ln))     # 字数は比べない（直してよい）
+        for m in (align, INDENT_MARK if first else ""):
+            if m:
+                out.append((m.strip(), ln))
     return out
 
 

@@ -17,6 +17,8 @@ from tkinter import ttk
 from . import APP_NAME, __version__, config, ime, naiyou, printing, theme, tooltip, vadm
 from .ai_ops import AiMixin
 from .doctypes import DOC_TYPES, PAGE_NUMBER_LABELS
+from .document import (CENTER_MARK, INDENT_MARK, PAGE_BREAK_MARK, RIGHT_MARK, SECTION_BREAK_MARK, TITLE_MARK,
+                       TOC_MARK)
 from .dialogs import OptionsDialog
 from .editor_ops import EditorMixin
 from .file_ops import FileMixin
@@ -170,15 +172,15 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         key("p", self.on_print)
         key("f", lambda: self.on_find(False))
         key("h", lambda: self.on_find(True), mac=False)
-        key("e", lambda: self.on_align("{中央}"))
-        key("r", lambda: self.on_align("{右}"))
+        key("e", lambda: self.on_align(CENTER_MARK))
+        key("r", lambda: self.on_align(RIGHT_MARK))
         key("b", self.on_bold)
         # 蛍光ペンは Word と同じ Ctrl+Alt+H（Ctrl+H の置換より細かい指定なので、こちらが先に効く）
         for k in ("h", "H"):
             self.bind(f"<Control-Alt-Key-{k}>", lambda e: (self.on_highlight(), "break")[1])
         # 次のキーは、エディターのもとの働き（改行・選択を広げる）より先に受ける
         for mod in mods:
-            self.text.bind(f"<{mod}-Return>", lambda e: (self.on_line_mark("{改ページ}"), "break")[1])
+            self.text.bind(f"<{mod}-Return>", lambda e: (self.on_line_mark(PAGE_BREAK_MARK), "break")[1])
         # インデント（Ctrl+I。付ける・外す。エディターのもとの働きはタブを入れる）。2026-10-24 班長指示
         for mod in mods:
             for k in ("i", "I"):
@@ -302,16 +304,16 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         g.block(frame)
         self.doc_type_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
         self.page_number_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
-        for label, mark, icon in (("表題", "{表題}", "document_header"), ("中央", "{中央}", "text_align_center"),
-                                  ("右", "{右}", "text_align_right"), ("字下げ", "{字下}", "text_first_line")):
+        for label, mark, icon in (("表題", TITLE_MARK, "document_header"), ("中央", CENTER_MARK, "text_align_center"),
+                                  ("右", RIGHT_MARK, "text_align_right"), ("字下げ", INDENT_MARK, "text_first_line")):
             g.small(label, lambda m=mark: self.on_align(m), icon)
         # ［インデント］は［字下げ］の下に置く（2026-10-24 班長指示）
         g.small("インデント", self.on_indent, "text_indent_increase")
         # 1行あけるのは、エディターの空の行で行う（Word と同じ。［空行］は置かない。2026-10-23 班長決定）
         g = rb.group("挿入")
-        for label, mark, icon in (("改ページ", "{改ページ}", "document_page_break"),
-                                  ("セクション区切り", "{セクション区切り}", "document_split_hint"),
-                                  ("目次", "{目次:3}", "text_bullet_list_square")):   # 段数は手で直す（2026-10-24）
+        for label, mark, icon in (("改ページ", PAGE_BREAK_MARK, "document_page_break"),
+                                  ("セクション区切り", SECTION_BREAK_MARK, "document_split_hint"),
+                                  ("目次", TOC_MARK, "text_bullet_list_square")):   # 段数は手で直す（2026-10-24）
             g.small(label, lambda m=mark: self.on_line_mark(m), icon)
         # 検索・置換は「編集」の組にする（Word のリボンのホームのタブと同じ名前。2026-10-23 班長決定）
         g = rb.group("編集")
@@ -358,7 +360,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         ys.pack(side="right", fill="y")
         self.text.pack(side="left", fill="both", expand=True)
         self.text.tag_configure("registered", background=theme.REGISTERED_BG)
-        # 配置・改ページなどの記号（{表題} など）は、確認表示の印と同じ青い字で示す（2026-10-23 班長指示）
+        # 配置・改ページなどの記号（:=: など）は、確認表示の印と同じ青い字で示す（2026-10-23 班長指示）
         self.text.tag_configure("mark", foreground=theme.ACCENT)
         # 太字（**文字**）の字は、エディターでも太く示す（2026-10-24）
         family, size = theme.editor_font(self)
