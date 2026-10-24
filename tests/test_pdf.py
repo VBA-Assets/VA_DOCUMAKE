@@ -1,0 +1,82 @@
+"""PDF の書き出しを確かめる（仕様.md の6.1・6.4・9.1・9.3）。
+
+正解の tests/data/裁判所/VA公用文.pdf は、班長が VA公用文 Ver8D3 で見本を整え、Word で PDF に保存したもの
+（裁判所提出書類、ページ番号は下中央。2026-10-23）。
+"""
+import difflib
+from pathlib import Path
+
+import fitz
+import pytest
+
+from va_documake.doctypes import DOC_TYPES
+from va_documake.document import parse
+from va_documake.layout import Typesetter
+from va_documake.pdfwriter import check_embeddable, read_id, write_pdf, DEFAULT_FONT
+
+DATA = Path(__file__).parent / "data"
+
+
+def chars(path):
+    out = []
+    with fitz.open(path) as doc:
+        for pno, page in enumerate(doc, start=1):
+            for b in page.get_text("rawdict")["blocks"]:
+                for ln in b.get("lines", []):
+                    for sp in ln["spans"]:
+                        for ch in sp["chars"]:
+                            if ch["c"] not in (" ", "　"):
+                                out.append((ch["c"], pno, ch["origin"][0], ch["origin"][1]))
+    return out
+
+
+@pytest.fixture(scope="module")
+def saiban_pdf(tmp_path_factory):
+    dt = DOC_TYPES["Saiban"]
+    ts = Typesetter(dt)
+    lines = ts.layout(parse((DATA / "裁判所" / "見本.md").read_text(encoding="utf-8").splitlines(), dt))
+    path = tmp_path_factory.mktemp("pdf") / "準備書面.pdf"
+    write_pdf(ts, lines, str(path), doc_id="K7Q29XMD", version=3)
+    return path
+
+
+def test_same_position_as_va_kouyoubun_pdf(saiban_pdf):
+    """本文の字の上下・左右の位置とページ番号が、VA公用文の PDF と一致する。"""
+    w, p = chars(DATA / "裁判所" / "VA公用文.pdf"), chars(saiban_pdf)
+    body_w = [c for c in w if c[3] < 780]
+    body_p = [c for c in p if c[3] < 780]
+    sm = difflib.SequenceMatcher(None, [c[0] for c in body_w], [c[0] for c in body_p], autojunk=False)
+    pairs = [(body_w[i + k], body_p[j + k]) for i, j, n in sm.get_matching_blocks() for k in range(n)]
+    assert len(pairs) == len(body_w) == len(body_p)
+    assert all(a[1] == b[1] and abs(a[2] - b[2]) <= 0.5 and abs(a[3] - b[3]) <= 0.25 for a, b in pairs)
+    # ページ番号（下中央）
+    num_w = [c for c in w if c[3] >= 780]
+    num_p = [c for c in p if c[3] >= 780]
+    assert len(num_w) == len(num_p) == 3
+    assert all(a[0] == b[0] and abs(a[2] - b[2]) <= 0.1 and abs(a[3] - b[3]) <= 0.1 for a, b in zip(num_w, num_p))
+
+
+def test_id_and_no_metadata(saiban_pdf):
+    """識別子に文書ID と版が入り、文書情報と XMP が入っていない。"""
+    assert read_id(str(saiban_pdf)) == ("K7Q29XMD", 3)
+    with fitz.open(saiban_pdf) as doc:
+        assert not any(doc.metadata.get(k) for k in ("title", "author", "subject", "keywords", "creator", "producer"))
+        assert doc.get_xml_metadata() == ""
+
+
+def test_id_survives_resave(saiban_pdf, tmp_path):
+    """保存し直しても、識別子の文書ID と版が残る。"""
+    other = tmp_path / "保存し直し.pdf"
+    with fitz.open(saiban_pdf) as doc:
+        doc.save(other)
+    assert read_id(str(other)) == ("K7Q29XMD", 3)
+
+
+def test_no_id_for_other_pdf():
+    """VA DocuMakeが作っていない PDF は、識別子なしと判別する。"""
+    assert read_id(str(DATA / "裁判所" / "VA公用文.pdf")) is None
+
+
+def test_ms_mincho_is_embeddable():
+    """ＭＳ 明朝の埋め込みの許可は「編集可能」（fsType=8）。"""
+    assert check_embeddable(*DEFAULT_FONT) == 8

@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+dist/
+build/
+
+# 配布用リリースパッケージ（ビルド生成物）
+release_*/
+
+# 試作の出力（PDF・比較結果。試作のスクリプトから再生成できる）
+試作/出力/
+
+# 操作マニュアルの PDF（scripts\generate_manual.py で作る）
+docs/manual/*.pdf

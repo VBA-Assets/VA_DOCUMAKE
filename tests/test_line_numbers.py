@@ -1,0 +1,95 @@
+"""行番号（VA公用文と同じ：5行ごと、ページごとに 1 から、表の中の行は数えない。2026-10-24 班長指示）。"""
+import fitz
+
+from va_documake import vadm
+from va_documake.doctypes import DOC_TYPES
+from va_documake.document import parse
+from va_documake.layout import Typesetter
+from va_documake.pdfwriter import LINE_NUMBER_LAST_X, pdf_bytes
+from va_documake.recover import rebuild_dictionary
+
+DT = DOC_TYPES["Saiban"]
+
+
+def numbers(data, ts):
+    """PDF の行番号 [(ページ, 番号, 基準線の y)]。"""
+    out = []
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        for k, page in enumerate(doc):
+            for span in page.get_texttrace():
+                text = "".join(chr(c[0]) for c in span["chars"])
+                if text.isdigit() and span["chars"][0][2][0] < ts.margin_left - 1:
+                    out.append((k + 1, int(text), round(span["chars"][0][2][1], 2)))
+    return out
+
+
+def test_every_fifth_line_counting_blank_lines_not_table_rows():
+    text = ["一行目"] + [""] * 2 + ["四行目", "五行目", "| 表 | 表 |", "|---|---|", "| 中 | 中 |", "六行目"] + [f"行{k}" for k in range(7, 12)]
+    ts = Typesetter(DT)
+    paras = parse(text, DT)
+    lines = ts.layout(paras)
+    found = numbers(pdf_bytes(ts, lines, line_numbers=True), ts)
+    rows = {"".join(g.ch for g in ln.glyphs): ln.row for ln in lines}
+    # 空の段落も1行と数え、表の中の行は数えない
+    assert [(p, n) for p, n, _ in found] == [(1, 5), (1, 10)]
+    assert found[0][2] == round(ts.baseline(rows["五行目"]), 2)
+    assert found[1][2] == round(ts.baseline(rows["行10"]), 2)
+    assert not numbers(pdf_bytes(ts, lines), ts)          # 付けない設定では付けない
+
+
+def test_numbers_restart_on_each_page_and_align_right():
+    text = [f"段落{k}" for k in range(1, 30)]
+    ts = Typesetter(DT)
+    lines = ts.layout(parse(text, DT))
+    data = pdf_bytes(ts, lines, line_numbers=True)
+    found = numbers(data, ts)
+    per_page = ts.lines_page // 5
+    assert [n for p, n, _ in found if p == 1] == [5 * k for k in range(1, per_page + 1)]
+    assert [n for p, n, _ in found if p == 2] == [5 * k for k in range(1, (29 - ts.lines_page) // 5 + 1)]
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        last = [span["chars"][-1][2][0] for span in doc[0].get_texttrace()
+                if span["chars"][0][2][0] < ts.margin_left - 1]
+    assert last and all(abs(x - (ts.margin_left - LINE_NUMBER_LAST_X)) < 0.01 for x in last)    # 右をそろえる
+
+
+def test_rebuild_ignores_line_numbers(tmp_path):
+    """行番号は本文の左の余白にあるので、構文ファイルと PDF の突き合わせに入れない。"""
+    from va_documake.pdfwriter import write_pdf
+    from va_documake.pseudonym import Dictionary
+    real = ["原告　甲野太郎"] + [f"甲野太郎の主張{k}は争う。" for k in range(12)]
+    d = Dictionary()
+    d.register("甲野太郎", "人名")
+    ts = Typesetter(DT)
+    lines = ts.layout(parse(real, DT))
+    pdf = tmp_path / "a.pdf"
+    write_pdf(ts, lines, str(pdf), "K7Q29XMD", 1, line_numbers=True)
+    settings = vadm.Settings("Saiban", line_numbers=True)
+    content = vadm.parse_text(vadm.build("K7Q29XMD", 1, settings, d.pseudonymize("\n".join(real))))
+    rebuilt, r = rebuild_dictionary(content, pdf)
+    assert r.exact and not r.missing
+    assert rebuilt.restore(content.body_text)[0] == "\n".join(real)
+
+
+# 班長が VA公用文で作った PDF（試作\出力\VA公用文_行番号.pdf。tests\data\裁判所\見本.md と同じ文書・配置、裁判所提出書類・下中央・行番号を表示）の
+# 1ページ目の行番号：(番号, 各数字の左端の x, 基準線の y)。2ページ目も同じ、3ページ目は5行に満たないので番号なし（2026-10-24）
+WORD_NUMBERS = [(5, [62.9], 218.78), (10, [58.68, 62.88], 346.85), (15, [58.68, 62.88], 474.79),
+                (20, [58.68, 62.88], 602.83), (25, [58.68, 62.88], 730.9)]
+
+
+def test_line_numbers_match_va_kouyoubun():
+    """行番号の字の位置が、VA公用文の PDF と左右 0.1pt 以内で一致する（字の大きさも同じ）。上下は、Word でも行番号は
+    本文の行の基準線にあり、本文の行の位置の違い（0.06〜0.18pt。字の上下の位置の比較で分かっているもの）だけずれる。"""
+    from pathlib import Path
+    text = (Path(__file__).resolve().parent / "data" / "裁判所" / "見本.md").read_text(encoding="utf-8").splitlines()
+    ts = Typesetter(DT)
+    data = pdf_bytes(ts, ts.layout(parse(text, DT)), line_numbers=True)
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        assert len(doc) == 3
+        for k, page in enumerate(doc):
+            found = [(int("".join(chr(c[0]) for c in s["chars"])), [c[2][0] for c in s["chars"]], s["chars"][0][2][1],
+                      s["size"]) for s in page.get_texttrace() if s["chars"][0][2][0] < ts.margin_left - 1]
+            want = WORD_NUMBERS if k < 2 else []
+            assert [n for n, *_ in found] == [n for n, *_ in want]
+            for (n, xs, y, size), (_, wxs, wy) in zip(found, want):
+                assert all(abs(a - b) < 0.1 for a, b in zip(xs, wxs)) and abs(y - wy) < 0.2 and abs(size - 8.04) < 0.01
+

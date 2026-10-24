@@ -1,0 +1,126 @@
+"""ボタンの説明書き（マウスを重ねると、少し間をおいて出る。2026-10-23 班長指示）。
+
+見た目は Office と同じく、白地に細い灰色の枠（theme の色）。ボタンから離れる・押すと消える。
+"""
+import tkinter as tk
+
+from . import theme
+
+DELAY_MS = 500
+WRAP = 480          # 説明の折り返しの幅（画素）。Tk の折り返しは行頭の禁則を守らないので、文ごとに改行して折り返しを減らす
+
+# ボタン（ラジオボタン）の字 → 説明。ショートカットキーがあれば、説明の後に書く
+TIPS = {
+    "開く": "書式付きファイル（PDF）・構文ファイル（.vadm）・テキストを開きます。\nCtrl+O",
+    "保存": "書式付きファイル（PDF。実名のまま）と、AI に渡す構文ファイル（仮名化済み。仮名化した語を〔人名Ａ〕などの記号に置き換えた文章）を、"
+            "同じ版で保存します。保存していない変更があると、この［保存］のボタンが青い枠で囲まれます。\nCtrl+S",
+    "閉じる": "今の文書を閉じて、新しい文書にします（VA DocuMake は終わりません）。保存していない変更があれば尋ねます。",
+    "オプション": "構文ファイル（VADM）の保存場所、エディターの書体・字の大きさ・行の間隔、AI への指示を変えます。",
+    "印刷": "確認表示と同じページを、実際のサイズ（A4）で印刷します。\nCtrl+P",
+    "選択範囲を仮名化": "エディターで選んだ語を仮名化し、エディターの同じ語をすべて記号（〔人名Ａ〕など）に置き換えます。"
+                        "確認表示では実名のまま、地を薄い緑にして示します。記号を選んで押すと、解除します。",
+    "パスをコピー": "構文ファイルのフルパスを、クリップボードに写します。Claude Code では「このファイルを直して」と"
+                    "パスを貼って渡せます。Claude の添付の画面では、「ファイル名」の欄に貼ると、そのファイルを選べます。",
+    "コピー": "AI に渡す構文ファイル（VADM。仮名化済み）の中身を、クリップボードに写します。中身は、エディターに表示している文書（仮名化した語は"
+              "〔人名Ａ〕などの記号）と、その上に付ける AI への指示です。AI のチャット画面に貼り付けてください。"
+              "保存していない変更があれば、先に保存します。",
+    "貼り付け": "クリップボードの AI の回答を、エディターに取り込んで保存します（エディターは記号のまま。実名は確認表示で"
+                "見られます）。変わった段落は右の青い線で示します。Ctrl+Z で取り込む前に戻せます。",
+    "表題": "選んだ行（選んでいなければカーソルの行）を表題にします。もう一度押すと解除します。",
+    "中央": "選んだ行を中央揃えにします。もう一度押すと解除します。表のセルでは、そのセルの字を中央揃えにします（区切りの行〔2行目〕では、その列を中央揃えにします）。\nCtrl+E",
+    "右": "選んだ行を右揃えにします。もう一度押すと解除します。表のセルでは、そのセルの字を右揃えにします（区切りの行〔2行目〕では、その列を右揃えにします）。見出しの後で使うと、そこから先は見出し・インデントの"
+          "変換をしません。\nCtrl+R",
+    "字下げ": "選んだ段落の1行目だけを1字下げます。もう一度押すと解除します。見出しの後で使うと、そこから先は見出し・"
+              "インデントの変換をしません。",
+    "インデント": "選んだ段落（選んでいなければカーソルの段落）に、左インデントの記号 {イン:1} を付けます。"
+                  "もう一度押すと解除します。字数は、エディターで数字を直してください（{イン:3} なら全角3字）。"
+                  "見出しの段に合わせた自動のインデントは付きません。字下げと一緒に使えます。\nCtrl+I",
+    "均等割付": "選んだ字を、指定した字数の幅に均等に割り付けます（{均等:5}原告{均等} のように挟みます。"
+                "字数は選んだ字の数で入るので、エディターで直してください）。もう一度押すと解除します。表のセルでは、選んでいなければセルの字全体を割り付けます。",
+    "行番号": "左の余白に、5行ごとに行番号を付けます（ページごとに 1 から数えます。表の中の行は数えません）。"
+              "VA公用文の行番号と同じです。内容証明では付けません。",
+    "傍点": "選んだ字の上に、傍点（黒丸）を付けます（* で囲みます）。もう一度押すと解除します。"
+            "太字と重ねると ***語*** になります。",
+    "太字": "選んだ字を太字（ＭＳ ゴシック）にします（** で囲みます）。もう一度押すと解除します。"
+            "見出しの行では、同じ段の見出しをすべて太字にします。\nCtrl+B",
+    "改ページ": "カーソルの行の前で、ページを改めます（見出しの番号は続きます）。\nCtrl+Enter",
+    "目次": "カーソルの行の前に、目次の記号 {目次:3} を入れます（見出しの3段目まで。点線とページ番号付き）。"
+            "見出しの段数を変えるときは、エディターで数字を直してください（{目次:2} なら2段目まで）。",
+    "セクション区切り": "カーソルの行の前で、ページを改め、見出しの番号を第１から振り直します。",
+    "蛍光ペン": "選んだ字に、黄色の蛍光ペンを付けます（== で囲みます）。もう一度押すと解除します。"
+                "確認表示だけに出し、保存する PDF と印刷には出しません。\nCtrl+Alt+H",
+    "検索": "エディターの中の文字を探します。\nCtrl+F",
+    "置換": "エディターの中の文字を、別の文字に置き換えます。\nCtrl+H",
+    "＜": "前のページ",
+    "＞": "次のページ",
+    "－": "縮小",
+    "＋": "拡大",
+    "幅に合わせる": "ページの幅を、確認表示の幅に合わせます。",
+    "解除": "左の一覧で選んだ語の仮名化を解除します。解除した記号の英字は、ほかの語に使い直しません。",
+}
+
+
+def _by_sentence(text):
+    """文ごとに改行する（「。」の後。すでに改行のある所と、文の終わりは除く）。"""
+    return text.replace("。", "。\n").replace("。\n\n", "。\n").rstrip("\n")
+
+
+class Tooltip:
+    def __init__(self, widget, text):
+        self.widget, self.text = widget, text
+        self._job = None
+        self._win = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self.hide, add="+")
+        widget.bind("<ButtonPress>", self.hide, add="+")
+
+    def _schedule(self, event=None):
+        self.hide()
+        self._job = self.widget.after(DELAY_MS, self.show)
+
+    def show(self):
+        self._job = None
+        if self._win is not None or not self.widget.winfo_viewable():
+            return
+        x = self.widget.winfo_rootx() + 4
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        self._win = win = tk.Toplevel(self.widget)
+        win.withdraw()                                  # 位置を決めてから出す（出してからでは位置が効かない）
+        win.wm_overrideredirect(True)
+        win.configure(background=theme.BORDER)          # 1画素の灰色の枠
+        tk.Label(win, text=_by_sentence(self.text), justify="left", wraplength=WRAP, background=theme.FIELD_BG,
+                 foreground=theme.TEXT, padx=8, pady=5).pack(padx=1, pady=1)
+        win.update_idletasks()
+        # 画面の右端・下端からはみ出さないようにする
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+        x = min(x, sw - w - 4)
+        if y + h > sh:
+            y = self.widget.winfo_rooty() - h - 4
+        win.wm_geometry(f"{w}x{h}+{x}+{y}")
+        win.deiconify()
+        win.lift()
+
+    def hide(self, event=None):
+        if self._job is not None:
+            self.widget.after_cancel(self._job)
+            self._job = None
+        if self._win is not None:
+            self._win.destroy()
+            self._win = None
+
+
+def attach(root):
+    """root の中の、TIPS に説明のあるボタン・ラジオボタンに説明書きを付ける（アイコンを付ける前に呼ぶ）。"""
+    from tkinter import ttk
+    tips = []
+
+    def walk(widget):
+        for child in widget.winfo_children():
+            if isinstance(child, (ttk.Button, ttk.Radiobutton, tk.Checkbutton)):
+                text = str(child.cget("text")).replace("\n", "")     # リボンの大きいボタンは字を2行に分けている
+                if text in TIPS:
+                    tips.append(Tooltip(child, TIPS[text]))
+            walk(child)
+    walk(root)
+    return tips

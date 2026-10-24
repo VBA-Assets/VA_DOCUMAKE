@@ -1,0 +1,237 @@
+"""確認表示：組んだ PDF の全ページを縦に並べて表示し、エディターと連動させる（仕様.md の4）。
+
+メインの画面（app.MainWindow）の部品（mixin）。self.canvas・self.session などは MainWindow が持つ。
+"""
+import tkinter as tk
+
+import fitz  # PyMuPDF
+
+from . import theme
+from .layout import FONT_SIZE
+from .pdfwriter import FontNotEmbeddable
+from .pseudonym import TOKEN_RE
+
+
+ZOOM_STEPS = (0.5, 0.67, 0.75, 0.9, 1.0, 1.25, 1.5, 2.0)
+PAGE_GAP = 12               # 確認表示のページの間（画素）
+CURRENT_PAGE_BORDER = 3             # 編集中のページを囲む線の太さ（画素）
+CARET_SIZE, CARET_MIN_SIZE = 5, 4   # 確認表示の印（▼）の幅の半分（ポイント×表示倍率。小さくしすぎない画素）
+PREVIEW_SCROLL_STEP = 20    # ホイール1目盛り＝3単位で送る画素
+
+
+class PreviewMixin:
+    """確認表示（MainWindow に混ぜて使う）。"""
+
+    def _render_preview(self):
+        text = self.real_text()
+        if text is None:
+            return
+        try:
+            data = self.session.preview_pdf(text, highlight=True)     # 蛍光ペンは確認表示だけで塗る
+        except FontNotEmbeddable as e:
+            self.status.configure(text=str(e))
+            return
+        except Exception as e:      # 組めない文章でも、入力は続けられるようにする
+            self.status.configure(text=f"確認表示を作れませんでした：{e}")
+            return
+        if self._preview_doc is not None:
+            self._preview_doc.close()
+        self._preview_doc = fitz.open(stream=data, filetype="pdf")
+        self._layout_pages()
+
+    def _current_zoom(self):
+        if self._zoom is not None:
+            return self._zoom
+        width = max(self.canvas.winfo_width(), 100)
+        return (width - 2 * PAGE_GAP - 8) / self._preview_doc[0].rect.width
+
+    def _layout_pages(self, keep=True):
+        """全ページを縦に並べる（スクロールバー・ホイールでページをまたいで送れる）。
+
+        画像にするのは、見えているページだけとする（長い文書でも、組み直すたびに重くならない）。
+        組み直したときは、表示していた位置（全体の何割か）を保つ。
+        """
+        doc = self._preview_doc
+        if doc is None or not len(doc):
+            return
+        fraction = self.canvas.yview()[0] if keep else 0.0
+        zoom = self._current_zoom()
+        width = max(self.canvas.winfo_width(), 100)
+        self._page_size = (round(doc[0].rect.width * zoom), round(doc[0].rect.height * zoom))
+        pw, ph = self._page_size
+        x = max((width - pw) // 2, PAGE_GAP)
+        self._page_x = x
+        self._page_tops = [PAGE_GAP + k * (ph + PAGE_GAP) for k in range(len(doc))]
+        self._page_images = {}
+        self._render_zoom = zoom
+        self.canvas.delete("all")
+        for top in self._page_tops:
+            self.canvas.create_rectangle(x - 1, top - 1, x + pw, top + ph, outline=theme.BORDER, fill="white")
+        total_h = self._page_tops[-1] + ph + PAGE_GAP
+        self.canvas.configure(scrollregion=(0, 0, max(x + pw + PAGE_GAP, width), total_h))
+        self.canvas.yview_moveto(fraction)
+        self.zoom_label.configure(text=f"{round(zoom * 100)}%")
+        self._render_visible()
+        self._show_caret(scroll=False)
+
+    def _schedule_caret(self):
+        if self._caret_job is not None:
+            self.after_cancel(self._caret_job)
+        self._caret_job = self.after(120, self._show_caret)
+
+    def _cursor_real(self):
+        """エディターのカーソルの位置を、実名の文章の (行, 字) にする（エディターは仮名なので、記号と元の語の長さの
+        違いを直す）。"""
+        line, col = (int(v) for v in self.text.index("insert").split("."))
+        line -= 1
+        return line, self._token_col(self.text.get(f"{line + 1}.0", f"{line + 1}.end"), col, to_real=True)
+
+    def _token_col(self, line, col, to_real):
+        """仮名の行の字の位置 ↔ 実名の行の字の位置（記号の長さと元の語の長さが違うため）。
+
+        line は仮名の行。to_real なら col は仮名の行の位置で、実名の行の位置を返す。そうでなければ逆。
+        記号の中の位置は、元の語の初め（実名 → 仮名では記号の初め）にする。
+        """
+        v = r = 0           # 仮名の行と実名の行で、見終えたところ
+        for m in TOKEN_RE.finditer(line):
+            e = self.session.dictionary.find(m.group(0))
+            word_len = len(e.word) if e else len(m.group(0))
+            seg = m.start() - v         # 記号の前の、仮名・実名で同じ部分
+            if to_real:
+                if col <= m.start():
+                    return r + (col - v)
+                if col < m.end():
+                    return r + seg
+            else:
+                if col <= r + seg:
+                    return v + (col - r)
+                if col < r + seg + word_len:
+                    return m.start()
+            r += seg + word_len
+            v = m.end()
+        return r + (col - v) if to_real else v + (col - r)
+
+    def _show_caret(self, scroll=True):
+        """カーソルの字の位置に、確認表示で印を付ける。scroll なら、見えていないときにそのページへ送る。"""
+        self._caret_job = None
+        self.canvas.delete("caret")
+        self.canvas.delete("current_page")
+        m = self.session.layout_map
+        pos = self._cursor_real()
+        if m is None or pos is None or not getattr(self, "_page_tops", None):
+            return
+        found = m.locate(*pos)
+        if found is None:
+            return
+        page, x, top, h = found
+        if page >= len(self._page_tops):
+            return
+        z = self._render_zoom
+        # 編集中のページ（カーソルのあるページ）を太線で囲む（2026-10-23 班長指示）。線はページの外側に引き、
+        # ページの字にかからないようにする
+        pw, ph = self._page_size
+        px, pt, b = self._page_x, self._page_tops[page], CURRENT_PAGE_BORDER
+        self.canvas.create_rectangle(px - b / 2 - 1, pt - b / 2 - 1, px + pw + b / 2, pt + ph + b / 2,
+                                     outline=theme.ACCENT, width=b, tags="current_page")
+        cx = self._page_x + x * z
+        cy = self._page_tops[page] + top * z
+        # 印は、入力カーソルと同じ位置（字と字の間）の上の ▼（縦棒だと、確認表示に入力できるように見えるため。
+        # 2026-10-23 班長決定）
+        mid = cx
+        char_top = cy + (h - FONT_SIZE) / 2 * z
+        s = max(CARET_MIN_SIZE, CARET_SIZE * z)
+        self.canvas.create_polygon(mid - s, char_top - s * 1.6, mid + s, char_top - s * 1.6, mid, char_top - 1,
+                                   fill=theme.ACCENT, outline="", tags="caret")
+        if scroll:
+            view_top, view_h = self.canvas.canvasy(0), self.canvas.winfo_height()
+            if cy < view_top or cy + h * z > view_top + view_h:
+                total_h = self._page_tops[-1] + self._page_size[1] + PAGE_GAP
+                self.canvas.yview_moveto(max(0.0, (cy - view_h / 3) / total_h))
+                self._render_visible()
+
+    def on_preview_click(self, event):
+        """確認表示でクリックした字の位置に、エディターのカーソルを動かす。"""
+        m = self.session.layout_map
+        if m is None or not getattr(self, "_page_tops", None):
+            return
+        cx, cy = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        ph = self._page_size[1]
+        page = next((k for k, top in enumerate(self._page_tops) if top <= cy < top + ph), None)
+        if page is None:
+            return
+        z = self._render_zoom
+        hit = m.hit(page, (cx - self._page_x) / z, (cy - self._page_tops[page]) / z)
+        if hit is None:
+            return
+        self._move_cursor(*hit, scroll=False)
+
+    def _move_cursor(self, line, col, scroll=True):
+        """エディターのカーソルを、実名の文章の (行, 字) に動かし、確認表示に印を付ける（エディターは仮名なので、
+        記号の側の位置に直す）。"""
+        col = self._token_col(self.text.get(f"{line + 1}.0", f"{line + 1}.end"), col, to_real=False)
+        index = f"{line + 1}.{col}"
+        self.text.tag_remove("sel", "1.0", "end")
+        self.text.mark_set("insert", index)
+        self.text.see(index)
+        self.text.focus_set()
+        self._show_caret(scroll=scroll)
+
+    def _on_yscroll(self, first, last):
+        self._preview_yscroll.set(first, last)
+        self.after_idle(self._render_visible)
+
+    def _render_visible(self):
+        doc = self._preview_doc
+        if doc is None or not getattr(self, "_page_tops", None) or len(self._page_tops) != len(doc):
+            return
+        top = self.canvas.canvasy(0)
+        bottom = self.canvas.canvasy(self.canvas.winfo_height())
+        ph = self._page_size[1]
+        for k, y in enumerate(self._page_tops):
+            if y + ph < top - ph or y > bottom + ph or k in self._page_images:
+                continue
+            pix = doc[k].get_pixmap(matrix=fitz.Matrix(self._render_zoom, self._render_zoom), alpha=False)
+            self._page_images[k] = tk.PhotoImage(data=pix.tobytes("png"))
+            self.canvas.create_image(self._page_x, y, image=self._page_images[k], anchor="nw")
+            self.canvas.tag_raise("caret")
+            self.canvas.tag_raise("current_page")
+        # 表示中のページ：確認表示の真ん中にあるページ（一番上・一番下まで送ったときは、最初・最後のページ）
+        if self.canvas.yview()[0] <= 0:
+            self._preview_page = 0
+        elif self.canvas.yview()[1] >= 1:
+            self._preview_page = len(doc) - 1
+        else:
+            self._preview_page = self._page_at(top + self.canvas.winfo_height() / 2)
+        self.page_label.configure(text=f"{self._preview_page + 1} / {len(doc)}")
+
+    def _page_at(self, y):
+        """canvas の高さ y にあるページ（0 から）。"""
+        k = 0
+        for i, t in enumerate(self._page_tops):
+            if t - PAGE_GAP <= y:
+                k = i
+        return k
+
+    def on_page(self, step):
+        """前・次のページの上の端まで送る。"""
+        if self._preview_doc is None or not getattr(self, "_page_tops", None):
+            return
+        k = max(0, min(len(self._page_tops) - 1, self._preview_page + step))
+        total_h = self._page_tops[-1] + self._page_size[1] + PAGE_GAP
+        self.canvas.yview_moveto((self._page_tops[k] - PAGE_GAP) / total_h)
+        self._render_visible()
+
+    def on_zoom(self, step):
+        if self._preview_doc is None:
+            return
+        if step is None:
+            self._zoom = None
+        else:
+            current = self._current_zoom()
+            if step > 0:
+                bigger = [z for z in ZOOM_STEPS if z > current + 0.01]
+                self._zoom = bigger[0] if bigger else ZOOM_STEPS[-1]
+            else:
+                smaller = [z for z in ZOOM_STEPS if z < current - 0.01]
+                self._zoom = smaller[-1] if smaller else ZOOM_STEPS[0]
+        self._layout_pages()
