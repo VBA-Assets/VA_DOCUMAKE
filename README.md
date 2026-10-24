@@ -1,6 +1,6 @@
-# VA DocuMake — Word を使わずに、VA公用文と同じ書式の文書を作るツール
+# VA DocuMake — 実名を AI に渡さずに、VA公用文と同じ書式の文書を作るツール
 
-VA DocuMake は、裁判所提出書類・公用文・契約書などを、Word を使わずに、VA公用文（Word のアドイン）で整えたものと同じ書式の PDF にする、Windows 用の無料ツールです（Python 製）。文章の起案・推敲に AI（Claude など）を使うときは、依頼者などの名前を記号（〔人名Ａ〕など）に置き換えてから渡し、AI の回答を取り込むと元の名前に戻します。
+VA DocuMake は、弁護士が AI（Claude など）で書面を起案・推敲するときに、依頼者などの名前を記号（〔人名Ａ〕など）に置き換えてから渡し、AI の回答を取り込むと元の名前に戻し、裁判所提出書類・公用文・契約書などを VA公用文（Word のアドイン）で整えたものと同じ書式の PDF にする、Windows 用の無料ツールです（Python 製）。Word のマクロを使わないので、マクロの使用を禁止されていて VA公用文・VA仮名化を使えない事務所でも使えます。
 
 - 配布：[VBAアセット](https://vba-assets.net/)（実行ファイルとインストーラーは、サイトの記事からダウンロードしてください）
 - ライセンス：GNU Affero General Public License 第3版（[LICENSE](LICENSE)）。使っている部品のライセンスは [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)

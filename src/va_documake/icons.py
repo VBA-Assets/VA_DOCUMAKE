@@ -21,6 +21,7 @@ SVG_FILL = "#212121"
 # ボタンの字 → アイコンのファイル名（icons\<名前>.svg）
 BUTTON_ICONS = {
     "開く": "folder_open", "保存": "save", "印刷": "print", "閉じる": "document_dismiss", "オプション": "settings",
+    "コピーとして開く": "document_copy", "名前を付けて保存": "save_edit",
     "選択範囲を仮名化": "person_lock", "コピー": "copy", "貼り付け": "clipboard_paste",
     "表題": "document_header", "中央": "text_align_center", "右": "text_align_right", "字下げ": "text_first_line", "インデント": "text_indent_increase", "太字": "text_bold", "均等割付": "text_align_distributed", "傍点": "text_emphasis",
     "改ページ": "document_page_break", "セクション区切り": "document_split_hint", "目次": "text_bullet_list_square",

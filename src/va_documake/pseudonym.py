@@ -143,6 +143,24 @@ class Dictionary:
                 return e
         return None
 
+    def rename(self, word_or_token, new_word):
+        """登録した語の元の語を変え、前の語を返す（記号は変えない。過去の文書・テンプレートを使い回すとき、
+        〔人名Ａ〕を前の事件の名前から新しい名前にする。2026-10-25 班長指示）。"""
+        e = self.find(word_or_token)
+        if e is None:
+            raise KeyError(word_or_token)
+        new_word = trim_selection(new_word)
+        if new_word == e.word:
+            return e.word
+        if new_word in self.entries:
+            raise NotRegistrable(f"「{new_word}」は、すでに {self.entries[new_word].token} として仮名化しています。")
+        self.check(new_word)
+        old = e.word
+        del self.entries[old]
+        e.word = new_word
+        self.entries[new_word] = e
+        return old
+
     def find(self, word_or_token):
         key = normalize_token(trim_selection(word_or_token))
         for e in self.entries.values():

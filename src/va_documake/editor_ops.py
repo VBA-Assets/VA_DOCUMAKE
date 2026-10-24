@@ -13,7 +13,7 @@ from .document import (BULLET, CELL_ALIGN_RE, DISTRIBUTE_CLOSE, DISTRIBUTE_CLOSE
                        parse_separator, remove_bold, split_inline, split_lead_marks)
 from .find_dialog import FindDialog
 from .layout import is_half
-from .pseudonym import TOKEN_RE
+from .pseudonym import TOKEN_RE, normalize_token
 from .undo import undoable
 
 
@@ -66,6 +66,20 @@ class EditorMixin:
             for a in reversed(starts):
                 self.text.delete(f"1.0+{a}c", f"1.0+{a + len(old)}c")
                 self.text.insert(f"1.0+{a}c", new)
+        self.text.edit_modified(False)
+
+    def _restore_in_editor(self, words):
+        """エディターの記号を、元の語に戻す（words は {記号: 語}。英字が半角の記号も戻す。すべて解除で使う）。
+        Ctrl+Z 1回で戻る。"""
+        raw = self.raw_text()
+        spans = [(m.start(), m.end(), words[normalize_token(m.group(0))]) for m in TOKEN_RE.finditer(raw)
+                 if normalize_token(m.group(0)) in words]
+        if not spans:
+            return
+        with undoable(self.text):
+            for a, b, word in reversed(spans):
+                self.text.delete(f"1.0+{a}c", f"1.0+{b}c")
+                self.text.insert(f"1.0+{a}c", word)
         self.text.edit_modified(False)
 
     def _markdown_spans(self, raw):

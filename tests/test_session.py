@@ -186,3 +186,61 @@ def test_open_pdf_without_text_layer(tmp_path):
         doc.save(tmp_path / "OCR済み.pdf")
     assert s.open_pdf(tmp_path / "OCR済み.pdf").text == "透明な字の層"
 
+
+
+def test_save_as_keeps_previous_document(session, tmp_path):
+    """名前を付けて保存：新しい文書ID の文書になり、前の PDF と構文ファイルはそのまま残る（2026-10-25 班長指示）。"""
+    pdf = saved(session, tmp_path)
+    old_id, old_vadm = session.doc_id, session.vadm_path
+    old_raw = old_vadm.read_bytes()
+    new_text = REAL.replace("争う。", "否認する。")
+    new_pdf = tmp_path / "事件" / "準備書面（２）.pdf"
+    session.save_as(new_text, new_pdf)
+    assert session.doc_id != old_id and session.version == 1 and session.pdf_path == new_pdf
+    assert read_id(str(new_pdf)) == (session.doc_id, 1) and read_id(str(pdf)) == (old_id, 1)
+    assert old_vadm.read_bytes() == old_raw and session.vadm_path != old_vadm
+    # 仮名化した語の一覧は引き継ぐ
+    assert "〔人名Ａ〕" in session.vadm_path.read_text(encoding="utf-8")
+    # 前の PDF を開くと、前の文章のまま
+    assert Session(session.cfg).open_pdf(pdf).text == REAL
+    assert Session(session.cfg).open_pdf(new_pdf).text == new_text
+
+
+def test_save_as_failure_keeps_document(session, tmp_path, monkeypatch):
+    saved(session, tmp_path)
+    before = (session.doc_id, session.version, session.pdf_path)
+    from va_documake import session as session_module
+    monkeypatch.setattr(session_module, "write_pdf", lambda *a, **k: (_ for _ in ()).throw(PermissionError("開いている")))
+    with pytest.raises(PermissionError):
+        session.save_as(REAL, tmp_path / "別.pdf")
+    assert (session.doc_id, session.version, session.pdf_path) == before
+
+
+def test_detach_makes_a_new_document(session, tmp_path):
+    """コピーとして開く：開いた文書を、保存先のない新しい文書にする（開いただけでは変えたことにしない）。"""
+    saved(session, tmp_path)
+    s = Session(session.cfg)
+    s.open_vadm(session.vadm_path)
+    s.detach(REAL)
+    assert s.doc_id != session.doc_id and s.version == 0 and s.pdf_path is None
+    assert s.vadm_path.name == f"{s.doc_id}.vadm" and not s.is_modified(REAL)
+    assert s.dictionary.find("〔人名Ａ〕").word == "甲野太郎"
+
+
+def test_released_words_are_reported(session):
+    """解除した語・変える前の元の語が、構文ファイルに実名のまま残るかを確かめる（2026-10-25 班長指示）。"""
+    assert session.rename("〔人名Ａ〕", "丙川次郎") == "甲野太郎"
+    text = REAL.replace("甲野太郎", "丙川次郎", 1)        # 1か所だけ、前の名前が残った
+    assert session.released_in(text) == {"甲野太郎": 1}
+    assert session.released_in(REAL.replace("甲野太郎", "丙川次郎")) == {}
+    assert {e.token for e in session.unregister_all()} == {"〔人名Ａ〕", "〔法人Ａ〕"}
+    assert not session.dictionary.entries
+    found = session.released_in(REAL)
+    assert found == {"甲野太郎": 2, "乙山商事株式会社": 2}
+    session.accept_released(["甲野太郎"])                 # 残してよいと答えた語は、もう知らせない
+    assert session.released_in(REAL) == {"乙山商事株式会社": 2}
+    # 仮名化し直した語は、構文ファイルに残らないので知らせない
+    session.dictionary.register("乙山商事株式会社", "法人")
+    assert session.released_in(REAL) == {}
+    session.new()
+    assert session.released == {}

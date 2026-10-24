@@ -80,3 +80,20 @@ def test_spans_longest_first_non_overlapping():
 
 def test_tokens_in():
     assert tokens_in("〔人名Ａ〕と〔法人B〕と〔不明Ａ〕") == ["〔人名Ａ〕", "〔法人Ｂ〕"]
+
+
+def test_rename_keeps_token():
+    """元の語を変えても、記号は変わらない（過去の文書・テンプレートの使い回し。2026-10-25 班長指示）。"""
+    d = Dictionary()
+    d.register("山田太郎", "人名")
+    d.register("鈴木花子", "人名")
+    assert d.rename("〔人名Ａ〕", "佐藤次郎") == "山田太郎"
+    assert d.find("〔人名Ａ〕").word == "佐藤次郎" and "山田太郎" not in d.entries
+    assert d.restore("〔人名Ａ〕と〔人名Ｂ〕")[0] == "佐藤次郎と鈴木花子"
+    assert d.rename("佐藤次郎", "佐藤次郎") == "佐藤次郎"        # 同じ語なら何もしない
+    with pytest.raises(NotRegistrable):
+        d.rename("〔人名Ａ〕", "鈴木花子")                           # ほかの記号の語
+    with pytest.raises(NotRegistrable):
+        d.rename("〔人名Ａ〕", "人名Ｃ")                             # 記号と重なる語
+    assert d.find("〔人名Ａ〕").word == "佐藤次郎"
+    assert d.register("田中一郎", "人名") == "〔人名Ｃ〕"

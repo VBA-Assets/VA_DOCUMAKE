@@ -59,6 +59,31 @@ class KindDialog(_Dialog):
         self.destroy()
 
 
+class RenameDialog(_Dialog):
+    """仮名化した語の元の語を変える（記号はそのまま。2026-10-25 班長指示）。"""
+
+    def __init__(self, parent, entry):
+        super().__init__(parent, "元の語を変える")
+        self.result = None
+        body = ttk.Frame(self, padding=(16, 14, 16, 4))
+        body.pack(fill="both")
+        ttk.Label(body, text=f"{entry.token} の元の語を変えます。文章の中の {entry.token} は、すべて新しい語になります。"
+                  ).pack(anchor="w", pady=(0, 8))
+        ttk.Label(body, text=f"今の語：{entry.word}", style="Note.TLabel").pack(anchor="w", pady=(0, 4))
+        self.word = tk.StringVar(value=entry.word)
+        box = ttk.Entry(body, textvariable=self.word, width=40)
+        box.pack(anchor="w", fill="x")
+        box.select_range(0, "end")
+        box.focus_set()
+        self.buttons("変える", self.ok)
+        self.bind("<Return>", lambda e: self.ok())
+        self.run()
+
+    def ok(self):
+        self.result = self.word.get()
+        self.destroy()
+
+
 class ChangedOutsideDialog(_Dialog):
     """構文ファイルが外で書き換えられたことを知らせ、どうするかを尋ねる。result は "import"・"overwrite"・None。"""
 

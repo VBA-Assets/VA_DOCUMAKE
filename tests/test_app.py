@@ -569,7 +569,7 @@ def test_buttons_have_icons(window):
                 yield c
             yield from buttons(c)
     found = {str(b.cget("text")).replace("\n", ""): b for b in buttons(window)}
-    for text in ("開く", "保存", "印刷", "閉じる", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "字下げ", "インデント", "太字", "均等割付",
+    for text in ("開く", "保存", "印刷", "閉じる", "コピーとして開く", "名前を付けて保存", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "字下げ", "インデント", "太字", "均等割付",
                  "改ページ", "セクション区切り", "検索", "置換", "蛍光ペン", "幅に合わせる"):
         assert found[text].cget("image"), text
         # リボンの大きいボタン（AI 連携）はアイコンの下に字、ほかはアイコンの右に字
@@ -1101,3 +1101,79 @@ def test_copy_vadm_path(window, tmp_path):
     window.copy_path_button.invoke()
     assert window.clipboard_get() == str(window.session.vadm_path) and window.session.vadm_path.is_absolute()
     assert "パスをコピーしました" in str(window.status.cget("text"))
+
+
+def test_save_as_and_open_copy(window, tmp_path, monkeypatch):
+    """名前を付けて保存・コピーとして開く：前の事件の PDF と構文ファイル（テンプレート）を上書きしない（2026-10-25 班長指示）。"""
+    first = tmp_path / "準備書面.pdf"
+    window.session.pdf_path = first
+    assert window.on_save()
+    old_id, old_vadm = window.session.doc_id, window.session.vadm_path
+    old_raw = old_vadm.read_bytes()
+    # 名前を付けて保存：今の PDF と同じ名前は断り、別の名前で新しい文書として保存する
+    warned = []
+    monkeypatch.setattr(messagebox, "showwarning", lambda *a, **k: warned.append(a[1]))
+    second = tmp_path / "準備書面（２）.pdf"
+    answers = iter([str(first), str(second)])
+    monkeypatch.setattr(file_ops.filedialog, "asksaveasfilename", lambda **k: next(answers))
+    window.text.tag_add("changed", "1.0", "2.0")
+    assert window.on_save_as()
+    second_id = window.session.doc_id
+    assert warned and "同じ名前" in warned[0]
+    assert window.session.doc_id != old_id and window.session.version == 1 and window.session.pdf_path == second
+    assert read_id(str(first)) == (old_id, 1) and old_vadm.read_bytes() == old_raw
+    assert read_id(str(second)) == (window.session.doc_id, 1)
+    assert not window.text.tag_ranges("changed")              # 前の文書の AI の印は引き継がない
+    assert "新しい文書として保存しました" in str(window.status.cget("text"))
+    assert window.bind("<F12>")
+    # コピーとして開く：開いたファイルには書かず、初めて保存するときに保存先を尋ねる
+    monkeypatch.setattr(file_ops.filedialog, "askopenfilename", lambda **k: str(first))
+    window.on_open_copy()
+    s = window.session
+    assert s.doc_id not in (old_id, second_id) and s.version == 0 and s.pdf_path is None
+    assert window.raw_text() == PSEUDO.rstrip("\n") and window.tree.get_children() == ("〔人名Ａ〕",)
+    assert not s.is_modified(window.real_text())              # 開いただけでは尋ねない
+    assert str(window.pdf_name_label.cget("text")) == "書式付き（PDF）ファイル：（保存していません）"
+    assert "コピーとして開きました" in str(window.status.cget("text"))
+    window.text.insert("end", "追記。\n")
+    third = tmp_path / "準備書面（３）.pdf"
+    monkeypatch.setattr(file_ops.filedialog, "asksaveasfilename", lambda **k: str(third))
+    assert window.on_save()
+    assert read_id(str(third)) == (s.doc_id, 1) and read_id(str(first)) == (old_id, 1)
+    assert old_vadm.read_bytes() == old_raw
+
+
+def test_rename_unregister_all_and_released_check(window, tmp_path, monkeypatch):
+    """元の語を変える・すべて解除・解除した語の残りの確かめ（2026-10-25 班長指示）。"""
+    from types import SimpleNamespace
+    # 元の語を変える：記号はそのまま、文章の中の記号がすべて新しい語になる。新しい語を打ってあれば記号にする
+    window.text.insert("end", "丙川次郎の陳述書。\n")
+    window.tree.selection_set("〔人名Ａ〕")
+    monkeypatch.setattr(ai_ops, "RenameDialog", lambda parent, e: SimpleNamespace(result="丙川次郎"))
+    window.on_rename()
+    assert window.raw_text() == PSEUDO + "〔人名Ａ〕の陳述書。\n"
+    assert window.real_text() == TEXT.replace("甲野太郎", "丙川次郎") + "丙川次郎の陳述書。\n"
+    assert window.tree.item("〔人名Ａ〕", "values")[1] == "丙川次郎"
+    assert "「甲野太郎」から「丙川次郎」に" in str(window.status.cget("text"))
+    # 前の名前が残っていれば、保存するときに知らせ、その所を選んで見せる
+    window.text.insert("end", "甲野太郎の陳述書。\n")
+    window.session.pdf_path = tmp_path / "準備書面.pdf"
+    asked = []
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(a[1]) or False)
+    assert not window.on_save()
+    assert asked and "甲野太郎（1 か所）" in asked[0] and not window.session.pdf_path.exists()
+    assert window.text.get("sel.first", "sel.last") == "甲野太郎"
+    # 残してよいと答えれば保存し、次からは尋ねない
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(a[1]) or True)
+    assert window.on_save()
+    n = len(asked)
+    window.text.insert("end", "追記。\n")
+    assert window.on_save() and len(asked) == n
+    # すべて解除：エディターの記号を元の語に戻し、一覧を空にする。エディターは Ctrl+Z 1回で戻る
+    before = window.raw_text()
+    window.on_unregister_all()
+    assert "〔" not in window.raw_text() and "丙川次郎の陳述書。" in window.raw_text()
+    assert not window.tree.get_children() and not window.session.dictionary.entries
+    assert window.session.released_in(window.real_text()) == {"丙川次郎": 3}
+    window.text.edit_undo()
+    assert window.raw_text() == before
