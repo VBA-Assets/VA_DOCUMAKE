@@ -10,7 +10,9 @@
 import io
 import os
 import re
+import sys
 import tempfile
+from pathlib import Path
 
 import fitz  # PyMuPDF
 from fontTools.ttLib import TTCollection, TTFont as FTFont
@@ -22,10 +24,28 @@ from .doctypes import (FW_DIGITS, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_
                        PAGE_NUMBER_BOTTOM_RIGHT, PAGE_NUMBER_NONE, PAGE_NUMBER_TOP_RIGHT)
 from .layout import DOT_RADIUS, DOT_RISE, DOUBLE_RULE_GAP, FONT_SIZE, MM, PAGE_H, PAGE_W, RULE_WIDTH
 
-FONT_NAME = "VADM-Mincho"
-DEFAULT_FONT = (r"C:\Windows\Fonts\msmincho.ttc", 0)   # ＭＳ 明朝（Windows）
-BOLD_FONT_NAME = "VADM-Gothic"
-BOLD_FONT = (r"C:\Windows\Fonts\msgothic.ttc", 0)      # 太字はＭＳ ゴシック（VAスタイルの太字と同じ。字の幅はＭＳ 明朝と同じ）
+def _font_dir():
+    """同梱の書体（assets/fonts）の場所。exe（PyInstaller）では展開先（Windows の exe には入れない）。"""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)) / "assets" / "fonts"
+    return Path(__file__).resolve().parents[2] / "assets" / "fonts"
+
+
+# 書体の組（本文の明朝、太字のゴシック）。各書体は (ファイル, ttc の中の番号)。太字はゴシックで描く（VAスタイルの
+# 太字と同じ。字の幅は明朝と同じ）
+MS_FONTS = ((r"C:\Windows\Fonts\msmincho.ttc", 0), (r"C:\Windows\Fonts\msgothic.ttc", 0))   # ＭＳ 明朝・ＭＳ ゴシック
+# Mac など、ＭＳ 明朝のない PC では、同梱の IPA明朝・IPAゴシック（IPAフォントライセンス v1.0。再配布できる）を使う。
+# IPAex ではなく IPA を使うのは、ＭＳ 明朝と同じく英数字も含めてすべての字が等幅（半角は全角の半分）で、ページ番号の
+# 中央寄せと行番号の数字の送りが同じになるため。Mac のヒラギノは、reportlab が読めない形（CFF）なので使えない
+# （2026-10-25 班長決定）。字は1字ずつ位置を決めて置くので、本文の字の位置は書体によらない
+IPA_FONTS = ((str(_font_dir() / "ipam.ttf"), 0), (str(_font_dir() / "ipag.ttf"), 0))
+
+
+def _default_fonts():
+    return MS_FONTS if os.name == "nt" and os.path.exists(MS_FONTS[0][0]) else IPA_FONTS
+
+
+DEFAULT_FONTS = _default_fonts()
 HIGHLIGHT_COLOR = (1, 1, 0)     # 蛍光ペンの黄（Word の蛍光ペンの黄と同じ）。確認表示だけで塗る
 # 仮名化した語の地の色（確認表示だけ。エディターの記号の地と同じ薄い緑。theme.REGISTERED_BG と同じ値。2026-10-24 班長指示）
 PSEUDONYM_COLOR = (0xd9 / 255, 0xf2 / 255, 0xd9 / 255)
@@ -54,10 +74,14 @@ def check_embeddable(path, index=0):
     return fs_type
 
 
-def register_font(path, index=0, name=FONT_NAME):
-    check_embeddable(path, index)
+def register_font(path, index=0):
+    """書体を登録し、登録した名前を返す。名前は書体ファイルごとに替える（reportlab は、登録した名前に別の書体を
+    登録し直せない。試験では書体の組を替えて書き出す）。PDF に入る書体の名前は、書体そのものの名前（MS-Mincho など）。"""
+    name = f"VADM-{Path(path).stem}-{index}"
     if name not in pdfmetrics.getRegisteredFontNames():
+        check_embeddable(path, index)
         pdfmetrics.registerFont(TTFont(name, path, subfontIndex=index))
+    return name
 
 
 def _has_bold(ts, lines):
@@ -66,11 +90,11 @@ def _has_bold(ts, lines):
 
 
 def _draw_glyph(c, x, y, g):
-    """字を描く。太字の字はＭＳ ゴシックで描き、書体を戻す。"""
+    """字を描く。太字の字はゴシック（ＭＳ ゴシック、Mac などでは IPAゴシック）で描き、書体を戻す。"""
     if g.bold:
-        c.setFont(BOLD_FONT_NAME, FONT_SIZE)
+        c.setFont(c.vadm_fonts[1], FONT_SIZE)
         c.drawString(x, y, g.ch)
-        c.setFont(FONT_NAME, FONT_SIZE)
+        c.setFont(c.vadm_fonts[0], FONT_SIZE)
     else:
         c.drawString(x, y, g.ch)
 
@@ -89,12 +113,12 @@ def page_number_text(style, page, pages):
 
 
 def write_pdf(ts, lines, path, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTTOM_CENTER,
-              font=DEFAULT_FONT, line_numbers=False):
+              fonts=None, line_numbers=False):
     """Typesetter（ts）で組んだ行（lines）を PDF に書き出す。doc_id があれば識別子に文書ID と版を入れる。
 
     書き出し先と同じフォルダの一時ファイルに書いてから置き換える（途中で止まっても前の版が壊れない）。
     """
-    data = pdf_bytes(ts, lines, doc_id, version, page_number, font, line_numbers=line_numbers)
+    data = pdf_bytes(ts, lines, doc_id, version, page_number, fonts, line_numbers=line_numbers)
     fd, tmp = tempfile.mkstemp(suffix=".pdf", dir=os.path.dirname(os.path.abspath(path)))
     try:
         with os.fdopen(fd, "wb") as f:
@@ -105,23 +129,24 @@ def write_pdf(ts, lines, path, doc_id=None, version=None, page_number=PAGE_NUMBE
             os.remove(tmp)
 
 
-def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTTOM_CENTER, font=DEFAULT_FONT,
+def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTTOM_CENTER, fonts=None,
               highlight=False, line_numbers=False):
     """組んだ結果の PDF を、メモリの中で作って返す（画面の確認表示も、これを使う。文章を一時ファイルに書かない）。
 
     highlight が真なら、蛍光ペン（==文字==）の字の後ろを黄色に塗る（確認表示だけ。保存する PDF と印刷には塗らない。
-    2026-10-24 班長指示）。line_numbers が真なら、行番号を付ける（_draw_line_numbers）。
+    2026-10-24 班長指示）。line_numbers が真なら、行番号を付ける（_draw_line_numbers）。fonts は書体の組
+    （None は DEFAULT_FONTS）。
     """
-    register_font(*font)
-    if _has_bold(ts, lines):
-        register_font(*BOLD_FONT, name=BOLD_FONT_NAME)
+    mincho, gothic = fonts or DEFAULT_FONTS
     pages = max((ln.page for ln in lines), default=1)
     pages = max([pages] + [p.page for p in getattr(ts, "tables", [])])
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(PAGE_W, PAGE_H), invariant=1)
+    # 描くときに使う書体の名前（本文、太字）。描く関数は、ここから読む
+    c.vadm_fonts = (register_font(*mincho), register_font(*gothic) if _has_bold(ts, lines) else None)
     text_center = ts.margin_left + ts.text_w / 2
     for pg in range(1, pages + 1):
-        c.setFont(FONT_NAME, FONT_SIZE)
+        c.setFont(c.vadm_fonts[0], FONT_SIZE)
         # 本文の行と表を、上から（文書の順に）描く。PDF の字の並びが文書の順になり、
         # 構文ファイルとの突き合わせ（recover.py）で、表の前後の本文を取り違えない
         items = [(ts.baseline(ln.row), 0, ln) for ln in lines if ln.page == pg]
@@ -130,7 +155,7 @@ def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTT
         for _, is_table, item in sorted(items, key=lambda t: (t[0], t[1])):
             if is_table:
                 draw_table(c, ts, item, highlight)
-                c.setFont(FONT_NAME, FONT_SIZE)
+                c.setFont(c.vadm_fonts[0], FONT_SIZE)
                 continue
             y = PAGE_H - ts.baseline(item.row)
             if highlight:
@@ -181,14 +206,14 @@ def _draw_line_numbers(c, ts, lines, page):
     行の字と基準線をそろえる。"""
     rows = sorted({ln.row for ln in lines if ln.page == page}
                   | {r % ts.lines_page for r in ts.blank_rows if r // ts.lines_page + 1 == page})
-    c.setFont(FONT_NAME, LINE_NUMBER_SIZE)
+    c.setFont(c.vadm_fonts[0], LINE_NUMBER_SIZE)
     for k, row in enumerate(rows, start=1):
         if k % LINE_NUMBER_STEP == 0:
             # 1つの字の並びとして描く（PDF の字を読むと「10」になるように）。字の間隔で送りを広げる
             s = str(k)
             c.drawString(ts.margin_left - LINE_NUMBER_LAST_X - (len(s) - 1) * LINE_NUMBER_PITCH, PAGE_H - ts.baseline(row), s,
                          charSpace=LINE_NUMBER_PITCH - LINE_NUMBER_SIZE / 2)
-    c.setFont(FONT_NAME, FONT_SIZE)
+    c.setFont(c.vadm_fonts[0], FONT_SIZE)
 
 
 def _draw_dots(c, items):

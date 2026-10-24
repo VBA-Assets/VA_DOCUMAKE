@@ -264,6 +264,11 @@ class FileMixin:
 
     def on_print(self):
         """確認表示と同じページを、プリンターに実際のサイズ（A4）で印刷する。保存していなくても印刷できる。"""
+        if not printing.available():
+            # Windows だけ（Mac などでは［印刷］を押せない。Ctrl+P も効かせない）。保存した PDF を、PDF のソフトで印刷する
+            messagebox.showinfo(APP_NAME, "この PC では、VA DocuMake から印刷できません。保存した PDF を開いて印刷してください。",
+                                parent=self)
+            return
         text = self.real_text()
         text = self._guard_tokens(text)
         if text is None:

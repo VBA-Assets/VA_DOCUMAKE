@@ -32,6 +32,9 @@ COMPONENTS = [
      "GNU General Public License 第2版以降（ブートローダーの例外条項付き）", ["licenses/COPYING.txt"]),
     ("Fluent UI System Icons", None, "ボタンのアイコン（［傍点］のアイコンを除く）", "MIT License",
      [ROOT / "src" / "va_documake" / "icons" / "LICENSE"]),
+    ("IPAフォント（IPA明朝・IPAゴシック）Ver.003.03", None,
+     "Mac など、ＭＳ 明朝のない PC で PDF に埋め込む書体（ソースの assets/fonts に同梱。exe には入らない）",
+     "IPAフォントライセンス v1.0", [ROOT / "assets" / "fonts" / "IPA_Font_License_Agreement_v1.0.txt"]),
 ]
 
 
@@ -45,7 +48,7 @@ def _license_files(dist: str | None, files: list) -> list[tuple[str, str]]:
             if not path.exists():
                 matches = [p for p in metadata.distribution(dist).files or [] if str(p).replace("\\", "/").endswith(f)]
                 path = Path(metadata.distribution(dist).locate_file(matches[0])) if matches else path
-        out.append((path.name, path.read_text(encoding="utf-8", errors="replace")))
+        out.append((path.name, path.read_text(encoding="utf-8-sig", errors="replace")))
     return out
 
 
@@ -54,7 +57,7 @@ def build() -> Path:
         "VA DocuMake が使っている部品のライセンスの表示",
         "",
         "VA DocuMake そのものは、GNU Affero General Public License 第3版（AGPL-3.0）で公開しています（LICENSE）。",
-        "VA DocuMake の実行ファイル（VA_DocuMake.exe）には、次の部品が入っています。",
+        "VA DocuMake の実行ファイル（VA_DocuMake.exe）には、次の部品が入っています（IPAフォントは、ソースにだけ入っています）。",
         "ＭＳ 明朝・ＭＳ ゴシックは入っていません（Windows に入っているものを、埋め込みの許可の範囲で PDF に埋め込みます）。",
         "",
     ]

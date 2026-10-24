@@ -155,16 +155,21 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         for seq in self.TK_EMACS_KEYS:
             self.text.bind_class("Text", seq, "")
 
-        def key(letter, command):
+        # Mac では、Ctrl に加えて Command（⌘）でも同じ働きにする（Mac のふつうのキー。2026-10-25）
+        mods = ("Control", "Command") if self.tk.call("tk", "windowingsystem") == "aqua" else ("Control",)
+
+        def key(letter, command, mac=True):
             # Caps Lock のときも効くよう、大文字・小文字の両方に付ける。このウィンドウの中だけで効く
-            for k in (letter, letter.upper()):
-                self.bind(f"<Control-Key-{k}>", lambda e: (command(), "break")[1])
+            # （mac が偽なら Command には付けない。Command+H は Mac で「隠す」）
+            for mod in (mods if mac else ("Control",)):
+                for k in (letter, letter.upper()):
+                    self.bind(f"<{mod}-Key-{k}>", lambda e: (command(), "break")[1])
         key("o", self.on_open)
         key("s", self.on_save)
         self.bind("<F12>", lambda e: (self.on_save_as(), "break")[1])     # 名前を付けて保存（Word と同じ）
         key("p", self.on_print)
         key("f", lambda: self.on_find(False))
-        key("h", lambda: self.on_find(True))
+        key("h", lambda: self.on_find(True), mac=False)
         key("e", lambda: self.on_align("{中央}"))
         key("r", lambda: self.on_align("{右}"))
         key("b", self.on_bold)
@@ -172,11 +177,13 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         for k in ("h", "H"):
             self.bind(f"<Control-Alt-Key-{k}>", lambda e: (self.on_highlight(), "break")[1])
         # 次のキーは、エディターのもとの働き（改行・選択を広げる）より先に受ける
-        self.text.bind("<Control-Return>", lambda e: (self.on_line_mark("{改ページ}"), "break")[1])
+        for mod in mods:
+            self.text.bind(f"<{mod}-Return>", lambda e: (self.on_line_mark("{改ページ}"), "break")[1])
         # インデント（Ctrl+I。付ける・外す。エディターのもとの働きはタブを入れる）。2026-10-24 班長指示
-        for k in ("i", "I"):
-            for widget in (self, self.text):
-                widget.bind(f"<Control-Key-{k}>", lambda e: (self.on_indent(), "break")[1])
+        for mod in mods:
+            for k in ("i", "I"):
+                for widget in (self, self.text):
+                    widget.bind(f"<{mod}-Key-{k}>", lambda e: (self.on_indent(), "break")[1])
         self.text.bind("<Alt-Shift-Left>", lambda e: (self.on_outline(-1), "break")[1])
         self.text.bind("<Alt-Shift-Right>", lambda e: (self.on_outline(1), "break")[1])
         for seq in ("<Control-Shift-Key-N>", "<Control-Shift-Key-n>"):

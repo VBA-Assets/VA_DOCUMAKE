@@ -12,7 +12,7 @@ import pytest
 from va_documake.doctypes import DOC_TYPES
 from va_documake.document import parse
 from va_documake.layout import Typesetter
-from va_documake.pdfwriter import check_embeddable, read_id, write_pdf, DEFAULT_FONT
+from va_documake.pdfwriter import check_embeddable, read_id, write_pdf, MS_FONTS
 
 DATA = Path(__file__).parent / "data"
 
@@ -79,4 +79,4 @@ def test_no_id_for_other_pdf():
 
 def test_ms_mincho_is_embeddable():
     """ＭＳ 明朝の埋め込みの許可は「編集可能」（fsType=8）。"""
-    assert check_embeddable(*DEFAULT_FONT) == 8
+    assert check_embeddable(*MS_FONTS[0]) == 8

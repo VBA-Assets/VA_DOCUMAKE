@@ -10,6 +10,7 @@ a = Analysis(
     # ・ボタンのアイコン（Fluent UI System Icons の SVG と LICENSE）。icons.py は va_documake\icons から読む
     # ・ウィンドウ（タイトルバー・タスクバー）のアイコン。exe そのもののアイコンは EXE(icon=...) で埋め込むが、
     #   Tk のウィンドウには、実行時にファイルとして読ませる必要があるため、展開先（sys._MEIPASS）に入れる
+    # ・同梱の IPA書体（assets/fonts。Mac などで使う）は入れない（Windows ではＭＳ 明朝を使う。pdfwriter.DEFAULT_FONTS）
     datas=[('src/va_documake/icons', 'va_documake/icons'), ('assets/VA_DocuMake.ico', 'assets')],
     hiddenimports=[],
     hookspath=[],
