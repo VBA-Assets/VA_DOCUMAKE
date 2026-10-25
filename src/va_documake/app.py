@@ -17,8 +17,8 @@ from tkinter import ttk
 from . import APP_NAME, __version__, config, ime, naiyou, printing, theme, tooltip, vadm
 from .ai_ops import AiMixin
 from .doctypes import DOC_TYPES, PAGE_NUMBER_LABELS
-from .document import (CENTER_MARK, HEADER_MARK, INDENT_MARK, PAGE_BREAK_MARK, RIGHT_MARK, SECTION_BREAK_MARK,
-                       TITLE_MARK, TOC_MARK)
+from .document import (BULLET_MARK, CENTER_MARK, HEADER_MARK, HEADING_BUTTON_MARK, INDENT_MARK, NUMBER_MARK,
+                       PAGE_BREAK_MARK, RIGHT_MARK, SECTION_BREAK_MARK, TITLE_MARK, TOC_MARK)
 from .dialogs import OptionsDialog
 from .editor_ops import EditorMixin
 from .file_ops import FileMixin
@@ -278,14 +278,15 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         g.small("名前を付けて保存", self.on_save_as, "save_edit")
         g.small("オプション", self.on_options, "settings")
         # 仮名化・コピー・貼り付けは一連の操作なので、1つの組にし、「ファイル」のすぐ右に置く（2026-10-23 班長指示）。
-        # 大きいボタンにする（2026-10-24 班長指示）
+        # ［選択範囲を仮名化］は大きいボタン、［コピー］［貼り付け］はその右に積む小さいボタンにする（2026-10-24・25 班長指示）
         g = rb.group("AI 連携")
-        self.register_button = g.large("選択範囲を仮名化", self.on_register, "person_lock", label="選択範囲を\n仮名化")
-        g.large("コピー", self.on_copy_vadm, "copy")
-        g.large("貼り付け", self.on_import, "clipboard_paste")
-        # 文書の種類・ページ番号の選択欄も「書式」の組に入れ、選択欄の左端をそろえる。配置と太字も「書式」の組にする
-        # （太字は配置ではないため）。［左］は置かない。同じボタンをもう一度押すと解除する（2026-10-23・24 班長指示）
-        g = rb.group("書式")
+        self.register_button = g.large("選択範囲を\n仮名化", self.on_register, "person_lock")
+        g.small("コピー", self.on_copy_vadm, "copy")
+        g.small("貼り付け", self.on_import, "clipboard_paste")
+        # 文書の種類・ページ番号の選択欄と［見出し］［箇条書き］［段落番号］は「スタイル」の組、［太字］から右は「書式」の
+        # 組にする（2026-10-25 班長指示。それまでは1つの「書式」の組）。選択欄の左端をそろえる。［左］は置かない。
+        # 同じボタンをもう一度押すと解除する（2026-10-23・24 班長指示）
+        g = rb.group("スタイル")
         frame, (self.doc_type_box, self.page_number_box) = labeled_rows(g.body, [
             ("文書の種類", lambda m: ttk.Combobox(m, state="readonly", width=16,
                                                 values=[d.label for d in DOC_TYPES.values()])),
@@ -297,14 +298,20 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.line_numbers_check = tk.Checkbutton(frame, text="行番号", variable=self.line_numbers_var,
                                                  command=self.on_settings_changed)
         self.line_numbers_check.grid(row=2, column=1, sticky="e", pady=1)
-        # 選択欄の右に、［太字］［傍点］［均等割付］を上から順に置く（2026-10-24 班長指示）
-        for r, (label, command, icon) in enumerate((("太字", self.on_bold, "text_bold"),
-                                                    ("傍点", self.on_dots, "text_emphasis"),
-                                                    ("均等割付", self.on_distribute, "text_align_distributed"))):
-            g.button(frame, label, command, icon).grid(row=r, column=2, sticky="w", padx=(8, 0))
         g.block(frame)
         self.doc_type_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
         self.page_number_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
+        # 選択欄の右に、［見出し］［箇条書き］［段落番号］を上から順に置く。見出しは ## で付け、レベルはエディターで
+        # # の数を直す（2026-10-25 班長指示）
+        for label, mark, icon in (("見出し", HEADING_BUTTON_MARK, "text_header_2"),
+                                  ("箇条書き", BULLET_MARK, "text_bullet_list_ltr"),
+                                  ("段落番号", NUMBER_MARK, "text_number_list_ltr")):
+            g.small(label, lambda m=mark: self.on_paragraph_kind(m), icon)
+        # 「書式」の組：［太字］［傍点］［均等割付］を上から順に置き（2026-10-24 班長指示）、その右に配置のボタン
+        g = rb.group("書式")
+        g.small("太字", self.on_bold, "text_bold")
+        g.small("傍点", self.on_dots, "text_emphasis")
+        g.small("均等割付", self.on_distribute, "text_align_distributed")
         for label, mark, icon in (("表題", TITLE_MARK, "document_title"), ("中央", CENTER_MARK, "text_align_center"),
                                   ("右", RIGHT_MARK, "text_align_right"), ("字下げ", INDENT_MARK, "text_first_line")):
             g.small(label, lambda m=mark: self.on_align(m), icon)
@@ -317,7 +324,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         g = rb.group("挿入")
         for label, mark, icon in (("改ページ", PAGE_BREAK_MARK, "document_page_break"),
                                   ("セクション区切り", SECTION_BREAK_MARK, "document_split_hint"),
-                                  ("目次", TOC_MARK, "text_bullet_list_square")):   # 段数は手で直す（2026-10-24）
+                                  ("目次", TOC_MARK, "text_bullet_list_square")):   # 載せる見出しのレベルは手で直す（2026-10-24）
             g.small(label, lambda m=mark: self.on_line_mark(m), icon)
         # 検索・置換は「編集」の組にする（Word のリボンのホームのタブと同じ名前。2026-10-23 班長決定）
         g = rb.group("編集")

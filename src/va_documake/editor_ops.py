@@ -7,11 +7,11 @@ import re
 import tkinter as tk
 
 from . import vadm
-from .document import (BULLET, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN, DISTRIBUTE_RE, HEADING,
-                       HEADING_MARK_RE, INDENT_MARK, LEAD_ALIGN_MARKS, LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, RIGHT_MARK,
-                       TABLE, area_of, cell_separators, has_inline_marks, inline_mark_spans, is_line_mark,
-                       lead_mark_len, leading_wrap, move_wraps_after_marks, parse, parse_separator, remove_bold,
-                       split_inline, split_lead_marks)
+from .document import (BULLET, BULLET_MARK, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN,
+                       DISTRIBUTE_RE, HEADING, HEADING_BUTTON_MARK, HEADING_MARK_RE, INDENT_MARK, LEAD_ALIGN_MARKS,
+                       LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, NUMBER_MARK, RIGHT_MARK, TABLE, area_of,
+                       cell_separators, has_inline_marks, inline_mark_spans, is_line_mark, lead_mark_len, leading_wrap,
+                       move_wraps_after_marks, parse, parse_separator, remove_bold, split_inline, split_lead_marks)
 from .find_dialog import FindDialog
 from .layout import is_half
 from .pseudonym import TOKEN_RE, normalize_token
@@ -336,7 +336,7 @@ class EditorMixin:
                 rest = lead.rest
                 align = "" if release or mark == INDENT_MARK else mark
                 first = not release and mark == INDENT_MARK
-                prefix = lead.area + align + lead.left + (INDENT_MARK if first else "")
+                prefix = lead._replace(align=align, first=first, rest="").join()
                 if norm != line:
                     self.text.delete(f"{n}.0", f"{n}.end")
                     self.text.insert(f"{n}.0", prefix + rest)
@@ -432,20 +432,8 @@ class EditorMixin:
             if not parts[1] and (HEADING_MARK_RE.match(parts[3]) or LIST_MARK_RE.match(parts[3])):
                 return None
             return parts
-        first, last = self._line_range()
-        lines = [target(self.text.get(f"{n}.0", f"{n}.end")) for n in range(first, last + 1)]
-        lines = [p for p in lines if p is not None]
-        if not lines:
-            return
-        release = all(p.left for p in lines)
-
-        def change(line, n):
-            parts = target(line)
-            if parts is None:
-                return None
-            mark = "" if release else (parts.left or LEFT_INDENT_MARK)
-            return parts.area + parts.align + mark + (INDENT_MARK if parts.first else "") + parts.rest
-        self._edit_lines(change)
+        self._toggle_lines(target, lambda p: p.left,
+                           lambda p, release: p._replace(left="" if release else p.left or LEFT_INDENT_MARK).join())
 
     def on_area(self, mark):
         """選んだ行（なければカーソルの行）を、ヘッダー・フッターの行にする（行頭に [HEADER] [FOOTER] を付ける。
@@ -460,18 +448,24 @@ class EditorMixin:
                     HEADING_MARK_RE.match(parts.rest) or LIST_MARK_RE.match(parts.rest)):
                 return None
             return parts
+        self._toggle_lines(target, lambda p: area_of(p.area) == area_of(mark),
+                           lambda p, release: p._replace(area="" if release else mark).join())
+
+    def _toggle_lines(self, target, has, build):
+        """行頭の記号を付け外しするボタン（［インデント］［ヘッダー］［見出し］［箇条書き］［段落番号］）の共通の流れ。
+        選んだ行（なければカーソルの行）のうち、target(行) が None でない行を対象とする。対象の行がすべて
+        has(target の結果) なら外し、そうでなければ付ける（行は build(target の結果, 外すか) に書き換える）。
+        対象の行がなければ何もしない。Ctrl+Z 1回で戻せる。"""
         first, last = self._line_range()
-        lines = [target(self.text.get(f"{n}.0", f"{n}.end")) for n in range(first, last + 1)]
-        lines = [p for p in lines if p is not None]
-        if not lines:
+        found = [target(self.text.get(f"{n}.0", f"{n}.end")) for n in range(first, last + 1)]
+        found = [p for p in found if p is not None]
+        if not found:
             return
-        release = all(area_of(p.area) == area_of(mark) for p in lines)
+        release = all(has(p) for p in found)
 
         def change(line, n):
             parts = target(line)
-            if parts is None:
-                return None
-            return ("" if release else mark) + parts.align + parts.left + (INDENT_MARK if parts.first else "") + parts.rest
+            return None if parts is None else build(parts, release)
         self._edit_lines(change)
 
     def _edit_lines(self, change):
@@ -501,28 +495,75 @@ class EditorMixin:
                 return len(m.group(1))
         return 0
 
+    def _level_for_plain(self, n):
+        """n 行目の本文（字のない行）を Alt+Shift+←／→ で見出しにするときのレベル。←・→ とも、直前の見出しと同じ。
+        直前に見出しがなければ、［見出し］と同じ ##（2026-10-25 班長指示）。"""
+        return self._heading_level_before(n) or len(HEADING_BUTTON_MARK.strip())
+
     def on_outline(self, step):
         """見出しのレベルを上げ下げする（Word の Alt+Shift+←／→）。step は -1（上げる）・+1（下げる）。
 
-        見出しは # の数を1つ減らす・増やす（1 より上げない。9 から下げると本文）。本文の行を上げると、直前の
-        見出しと同じレベルの見出しになる（直前に見出しがなければ第１の見出し）。本文の行は下げない（Word と同じ）。
+        見出しは # の数を1つ減らす・増やす。# から上げると本文、9 から下げると本文になる（# から上げるのは
+        2026-10-25 班長指示。それまでは # より上げなかった）。本文の行は、上げても下げても、直前の見出しと同じ
+        レベルの見出しになる（上げるのは Word と同じ。下げるのは 2026-10-25 班長指示。それまでは下げなかった）。
+        直前に見出しがなければ、［見出し］と同じ ## にする（公用文では第１のレベルを基本的に使わないため。
+        2026-10-25 班長指示）。
+        字のない行も、見出しの記号だけの行にする（選んだ行がすべて字のない行のとき。2026-10-25 班長指示）。
         """
+        blank = self._blank_range()
+
         def change(line, n):
+            if blank:
+                return "#" * self._level_for_plain(n) + " "
             if _special_line(line):
                 return None
             line = move_wraps_after_marks(line)     # 「**# 見出し**」は「# **見出し**」として扱う
             m = HEADING_MARK_RE.match(line)
             if m:
                 level = len(m.group(1)) + step
-                if level < 1:
-                    return None
-                if level > 9:
+                if level < 1 or level > 9:
                     return line[m.end():]
                 return "#" * level + " " + line[m.end():]
-            if step < 0 and line.strip():
-                return "#" * max(1, self._heading_level_before(n)) + " " + _strip_list(line.lstrip(" 　"))
+            if line.strip():
+                level = self._level_for_plain(n)
+                return "#" * level + " " + _strip_list(line.lstrip(" 　"))
             return None
         self._edit_lines(change)
+        if blank:
+            self._caret_to_line_end()
+
+    def _blank_range(self):
+        """選んだ行（なければカーソルの行）が、すべて字のない行か（空白だけの行も含む）。"""
+        first, last = self._line_range()
+        return all(not self.text.get(f"{n}.0", f"{n}.end").strip(" 　\t") for n in range(first, last + 1))
+
+    def _caret_to_line_end(self):
+        """字のない行に記号を付けた後、続けて字を打てるよう、カーソルを最後の行の行末に置く（選択は外す）。"""
+        _, last = self._line_range()
+        self.text.tag_remove("sel", "1.0", "end")
+        self.text.mark_set("insert", f"{last}.end")
+
+    def on_paragraph_kind(self, mark):
+        """選んだ行（なければカーソルの行）を、見出し（## ）・箇条書き（- ）・段落番号（1. ）にする（2026-10-25 班長指示）。
+        ほかの見出し・箇条書き・段落番号の記号は付け替える。対象の行がすべて既にその種類なら、記号を外して本文に
+        戻す（見出しは、どのレベルでも見出しとみなす。レベルは、エディターで # の数を直す）。表・改ページなどの記号の行・
+        区切りの行と、配置・+N・->・[HEADER] の記号のある行には付けない（見出しのレベルの上げ下げと同じ）。
+        字のない行は、選んだ行がすべて字のない行のときだけ記号を付け、カーソルを行末に置く（まだ打っていない行を
+        見出しなどにしてから書くため。2026-10-25 班長指示）。字のある行と一緒に選んだ字のない行（1行の空き）には
+        付けない。Ctrl+Z 1回で戻せる。"""
+        blank = self._blank_range()
+
+        def target(line):
+            if blank:
+                return "", ""
+            if _special_line(line):
+                return None
+            body = move_wraps_after_marks(line).lstrip(" 　")   # 「**# 見出し**」は「# **見出し**」として扱う
+            kind, end = _paragraph_kind(body)
+            return kind, body[end:]
+        self._toggle_lines(target, lambda p: p[0] == mark, lambda p, release: ("" if release else mark) + p[1])
+        if blank:
+            self._caret_to_line_end()
 
     def on_plain(self):
         """標準の本文（左寄せ）にする（Word の Ctrl+Shift+N）。見出し・箇条書き・段落番号・配置の記号を外す。"""
@@ -641,6 +682,17 @@ def _whole_bold(body):
     """見出しの字が、すべて太字か。"""
     plain, bold, _, _ = split_inline(body)
     return bool(plain.strip()) and all(k in bold for k, ch in enumerate(plain) if not ch.isspace())
+
+
+def _paragraph_kind(body):
+    """行頭の見出し・箇条書き・段落番号の記号 (［見出し］などで付ける記号, 記号の字数)。なければ ("", 0)。"""
+    m = HEADING_MARK_RE.match(body)
+    if m:
+        return HEADING_BUTTON_MARK, m.end()
+    m = LIST_MARK_RE.match(body)
+    if m:
+        return (BULLET_MARK if m.group(0) == BULLET_MARK else NUMBER_MARK), m.end()
+    return "", 0
 
 
 def _strip_list(line):

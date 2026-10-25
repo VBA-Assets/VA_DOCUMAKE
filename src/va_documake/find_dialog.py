@@ -10,13 +10,14 @@ class FindDialog(tk.Toplevel):
     """エディターの検索と置換（メモ帳と同じく、開いたまま使える。2026-10-23 班長指示）。
 
     エディターは常に仮名なので、仮名化した語（実名）を入れると記号を探す・記号にする。［すべて置換］は、Ctrl+Z 1回で元に戻せる。
+    ［検索］（Ctrl+F）では検索の欄とボタンだけを、［置換］（Ctrl+H）では置換の欄とボタンも出す（メモ帳・Word と同じ。
+    2026-10-25 班長指摘。それまでは、どちらも同じ画面だった）。開いたまま、もう片方を押すと切り替わる。
     """
 
     def __init__(self, main):
         super().__init__(main)
         self.main = main
         self.text = main.text
-        self.title("検索と置換")
         self.transient(main)
         self.resizable(False, False)
         self.configure(background=theme.WINDOW_BG)
@@ -30,19 +31,25 @@ class FindDialog(tk.Toplevel):
         ttk.Label(body, text="検索する文字列").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=2)
         self.find_entry = ttk.Entry(body, textvariable=self.find_var, width=36)
         self.find_entry.grid(row=0, column=1, sticky="we", pady=2)
-        ttk.Label(body, text="置換後の文字列").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=2)
+        self.replace_label = ttk.Label(body, text="置換後の文字列")
+        self.replace_label.grid(row=1, column=0, sticky="w", padx=(0, 8), pady=2)
         self.replace_entry = ttk.Entry(body, textvariable=self.replace_var, width=36)
         self.replace_entry.grid(row=1, column=1, sticky="we", pady=2)
         tk.Checkbutton(body, text="大文字と小文字を区別する", variable=self.case_var,
                        command=self.mark_all).grid(row=2, column=1, sticky="w", pady=(4, 0))
         buttons = ttk.Frame(body, padding=(12, 0, 0, 0))
         buttons.grid(row=0, column=2, rowspan=4, sticky="n")
-        for label, command, style in (("次を検索", lambda: self.find(True), "Accent.TButton"),
-                                      ("前を検索", lambda: self.find(False), "TButton"),
-                                      ("置換", self.replace_one, "TButton"),
-                                      ("すべて置換", self.replace_all, "TButton"),
-                                      ("閉じる", self.close, "TButton")):
-            ttk.Button(buttons, text=label, style=style, command=command, width=12).pack(fill="x", pady=(0, 4))
+        self.buttons = {}
+        for r, (label, command, style) in enumerate((("次を検索", lambda: self.find(True), "Accent.TButton"),
+                                                     ("前を検索", lambda: self.find(False), "TButton"),
+                                                     ("置換", self.replace_one, "TButton"),
+                                                     ("すべて置換", self.replace_all, "TButton"),
+                                                     ("閉じる", self.close, "TButton"))):
+            self.buttons[label] = b = ttk.Button(buttons, text=label, style=style, command=command, width=12)
+            b.grid(row=r, column=0, sticky="we", pady=(0, 4))
+        # 置換のときだけ出すもの
+        self._replace_widgets = (self.replace_label, self.replace_entry, self.buttons["置換"], self.buttons["すべて置換"])
+        self.replace_mode = None
         self.message = ttk.Label(self, style="Note.TLabel", padding=(12, 0, 12, 10))
         self.message.pack(fill="x")
         self.find_entry.bind("<Return>", lambda e: self.find(True))
@@ -52,6 +59,7 @@ class FindDialog(tk.Toplevel):
     def show(self, initial, replace):
         if initial:
             self.find_var.set(initial)
+        self._set_mode(replace)
         self.deiconify()
         self.lift()
         self.update_idletasks()
@@ -65,6 +73,18 @@ class FindDialog(tk.Toplevel):
         entry.focus_set()
         entry.select_range(0, "end")
         self.mark_all()
+
+    def _set_mode(self, replace):
+        """検索だけの画面と、置換もする画面を切り替える。"""
+        if replace == self.replace_mode:
+            return
+        self.replace_mode = replace
+        self.title("置換" if replace else "検索")
+        for w in self._replace_widgets:
+            if replace:
+                w.grid()
+            else:
+                w.grid_remove()
 
     def _nocase(self):
         return not self.case_var.get()

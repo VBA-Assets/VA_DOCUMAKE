@@ -98,6 +98,8 @@ TOC_MARK = "[TOC:3]"        # ［目次］で入れる記号
 HEADING_MARK_RE = re.compile(r"(#{1,9})(?: |[ 　]*$)")
 _NUMBERED_RE = re.compile(r"(\d+)\. ")
 LIST_MARK_RE = re.compile(r"- |\d+\. ")       # 箇条書き・段落番号の記号
+# ［見出し］［箇条書き］［段落番号］で付ける記号（見出しのレベルは、エディターで # の数を直す。2026-10-25 班長指示）
+HEADING_BUTTON_MARK, BULLET_MARK, NUMBER_MARK = "## ", "- ", "1. "
 _BOLD_RE = re.compile(r"\*\*(?! )([^*\n]+?)(?<! )\*\*")
 # 蛍光ペン。= が3つ以上続く所（表の区切りの行 |===|===| の「==|==」など）は記号とみなさない（2026-10-24）
 _HIGHLIGHT_RE = re.compile(r"(?<!=)==(?![ =])([^=\n]+?)(?<! )==(?!=)")
@@ -432,6 +434,10 @@ class LeadMarks(NamedTuple):
     first: bool     # -> があるか
     rest: str       # 記号の後ろ
     area: str = ""  # [HEADER] [FOOTER] の記号（書いたとおりの大文字・小文字）
+
+    def join(self):
+        """記号と記号の後ろをつないだ行。記号は、ボタンで付けるときの順（ヘッダー・配置・インデント・字下げ）に並べる。"""
+        return self.area + self.align + self.left + (INDENT_MARK if self.first else "") + self.rest
 
 
 def area_of(mark):

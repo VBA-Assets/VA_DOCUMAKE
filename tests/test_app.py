@@ -241,8 +241,17 @@ def test_save_asks_when_vadm_changed_outside(window, tmp_path, monkeypatch):
 
 def test_find_and_replace(window):
     """検索と置換（Ctrl+F・Ctrl+H）。すべて置換は Ctrl+Z 1回で戻る。"""
-    window.on_find(True)
+    # ［検索］では置換の欄とボタンを出さず、［置換］では出す。開いたまま切り替わる（2026-10-25 班長指摘）
+    window.on_find(False)
     d = window._find_dialog
+    replace_parts = (d.replace_label, d.replace_entry, d.buttons["置換"], d.buttons["すべて置換"])
+    assert d.title() == "検索" and not any(w.grid_info() for w in replace_parts)
+    assert d.buttons["次を検索"].grid_info() and d.buttons["閉じる"].grid_info()
+    window.on_find(True)
+    assert window._find_dialog is d and d.title() == "置換" and all(w.grid_info() for w in replace_parts)
+    window.on_find(False)
+    assert d.title() == "検索" and not any(w.grid_info() for w in replace_parts)
+    window.on_find(True)
     d.withdraw()
     d.find_var.set("甲野太郎")              # 仮名化した語で検索すると、エディターの記号を探す
     assert d.message.cget("text") == "2 件見つかりました。"
@@ -289,36 +298,37 @@ def test_save_button_is_accent_only_when_modified(window, tmp_path):
     assert str(window.save_button.cget("style")) == "Accent.Ribbon.TButton"
 
 
-def test_ribbon_groups_and_compact(window):
-    """ボタンは Word のリボンと同じく組に分け、組の名前を下端にそろえて書く。大きいボタンは AI 連携だけ。狭いときは、
-    AI 連携の大きいボタンを小さいボタンにして積み、それでも入らない組は次の段に送る（2026-10-24 班長指示）。"""
+def test_ribbon_groups_and_reflow(window):
+    """ボタンは Word のリボンと同じく組に分け、組の名前を下端にそろえて書く。大きいボタンは［選択範囲を仮名化］だけ。
+    狭いときは、入らない組を次の段に送る（2026-10-24 班長指示）。"""
     rb = window.ribbon
     titles = [str(g.grid_slaves(row=1, column=0)[0].cget("text")) for g in rb.groups]
-    assert titles == ["ファイル", "AI 連携", "書式", "挿入", "編集", "表示"]
-    # 文書の種類・ページ番号の選択欄は「書式」の組にあり、左端がそろう
+    assert titles == ["ファイル", "AI 連携", "スタイル", "書式", "挿入", "編集", "表示"]
+    # 文書の種類・ページ番号の選択欄は「スタイル」の組にあり、左端がそろう（2026-10-25 に「書式」から分けた）
     window.update_idletasks()
     assert window.doc_type_box.winfo_x() == window.page_number_box.winfo_x()
     w = window.doc_type_box
     while w is not None and w not in rb.groups:
         w = w.master
     assert w is rb.groups[2]
-    ai = rb.groups[1]
+    # 「スタイル」は選択欄と［見出し］［箇条書き］［段落番号］、「書式」は［太字］から右（2026-10-25 班長指示）
+    found = {str(b.cget("text")): b for b in _all_buttons(window)}
+    for text, k in (("見出し", 2), ("箇条書き", 2), ("段落番号", 2), ("太字", 3), ("傍点", 3), ("均等割付", 3), ("表題", 3)):
+        assert found[text].master is rb.groups[k].body, text
+    assert [int(found[t].grid_info()["row"]) for t in ("見出し", "箇条書き", "段落番号")] == [0, 1, 2]
     rb.reflow(10 ** 6)
     window.update_idletasks()
-    full = sum(g.full_width() for g in rb.groups)
+    full = sum(g.winfo_reqwidth() for g in rb.groups)
     rb.reflow(full + 10)
-    assert not ai.compact and len(rb._layout) == 1
+    assert len(rb._layout) == 1
     assert str(window.register_button.cget("compound")) == "top"
     assert str(window.register_button.cget("text")) == "選択範囲を\n仮名化"     # 大きいボタンは2行
     rb.reflow(full - 10)
-    assert ai.compact and len(rb._layout) == 1
-    assert str(window.register_button.cget("compound")) == "left"
-    assert str(window.register_button.cget("text")) == "選択範囲を仮名化"      # 縮めたときは1行
-    assert [g.compact for g in rb.groups] == [False, True, False, False, False, False]   # 小さいボタンの組は縮めない
+    assert len(rb._layout) == 2 and len(rb._layout[1]) == 1                  # 入らない最後の組だけを次の段に
     rb.reflow(400)
     assert len(rb._layout) >= 2
     rb.reflow(full + 10)
-    assert not ai.compact
+    assert len(rb._layout) == 1
 
 
 @pytest.mark.skipif(app.os.name != "nt", reason="IME の書体は Windows だけ")
@@ -505,15 +515,15 @@ def test_outline_level_and_plain(window):
     window.text.mark_set("insert", "2.0")
     window.text.event_generate("<Alt-Shift-Left>")
     assert _lines(window, 2, 2) == ["# 第二"]
-    window.text.event_generate("<Alt-Shift-Left>")          # 1 より上げない
+    window.text.event_generate("<Alt-Shift-Left>")          # # から上げると本文（2026-10-25 班長指示）
+    assert _lines(window, 2, 2) == ["第二"]
+    window.text.event_generate("<Alt-Shift-Right>")         # 本文を下げると、直前の見出し（#）と同じレベル
     assert _lines(window, 2, 2) == ["# 第二"]
     window.text.event_generate("<Alt-Shift-Right>")
     window.text.event_generate("<Alt-Shift-Right>")
     assert _lines(window, 2, 2) == ["### 第二"]
-    # 本文を上げると、直前の見出しと同じレベルの見出し。本文は下げない
+    # 本文を上げると、直前の見出しと同じレベルの見出し
     window.text.mark_set("insert", "3.0")
-    window.text.event_generate("<Alt-Shift-Right>")
-    assert _lines(window, 3, 3) == ["本文"]
     window.text.event_generate("<Alt-Shift-Left>")
     assert _lines(window, 3, 3) == ["### 本文"]
     # 9 から下げると本文
@@ -529,6 +539,79 @@ def test_outline_level_and_plain(window):
     window.text.edit_undo()
     assert _lines(window, 1, 4) == ["# 第一", "- 項目", "--: 以上", "1. 番号"]
     window.text.tag_remove("sel", "1.0", "end")
+
+
+def test_heading_bullet_number_buttons(window):
+    """［見出し］［箇条書き］［段落番号］：選んだ行の行頭に ## ・- ・1. を付け、ほかの種類の記号とは付け替える。すべて既に
+    その種類なら外す（見出しはどの段でも）。空の行・配置の記号の行・表には付けない。Ctrl+Z 1回で戻る（2026-10-25 班長指示）。"""
+    window._load_text("本文\n- 項目\n\n:-: 中央\n**# 第一**\n| a | b |")
+    window.text.tag_add("sel", "1.0", "6.end")
+    window.on_paragraph_kind("## ")
+    assert _lines(window, 1, 6) == ["## 本文", "## 項目", "", ":-: 中央", "## **第一**", "| a | b |"]
+    window.on_paragraph_kind("## ")                 # すべて見出しなので外す
+    assert _lines(window, 1, 6) == ["本文", "項目", "", ":-: 中央", "**第一**", "| a | b |"]
+    window.text.edit_undo()
+    assert _lines(window, 1, 2) == ["## 本文", "## 項目"]
+    window._load_text("### 三段\n  字下げした本文\n2. 番号")
+    window.text.tag_add("sel", "1.0", "3.end")
+    window.on_paragraph_kind("1. ")                 # 「2. 」も段落番号なので、外さずにそろえる
+    assert _lines(window, 1, 3) == ["1. 三段", "1. 字下げした本文", "1. 番号"]
+    window.on_paragraph_kind("- ")
+    assert _lines(window, 1, 3) == ["- 三段", "- 字下げした本文", "- 番号"]
+    window.on_paragraph_kind("- ")
+    assert _lines(window, 1, 3) == ["三段", "字下げした本文", "番号"]
+    window.text.tag_remove("sel", "1.0", "end")
+    window._load_text("# 見出し")                   # 選んでいなければカーソルの行。段の違う見出しも外す
+    window.text.mark_set("insert", "1.2")
+    window.on_paragraph_kind("## ")
+    assert _lines(window, 1, 1) == ["見出し"]
+    # 字のない行（まだ打っていない行）にも付け、カーソルを行末に置く。もう一度押すと外す（2026-10-25 班長指示）
+    window._load_text("前文\n\n後")
+    for mark in ("## ", "- ", "1. "):
+        window.text.mark_set("insert", "2.0")
+        window.on_paragraph_kind(mark)
+        assert _lines(window, 2, 2) == [mark] and window.text.index("insert") == f"2.{len(mark)}"
+        window.on_paragraph_kind(mark)
+        assert _lines(window, 2, 2) == [""]
+    window.text.mark_set("insert", "2.0")             # 続けて打てば、その種類の行になる
+    window.on_paragraph_kind("- ")
+    window.text.insert("insert", "項目")
+    assert _lines(window, 1, 3) == ["前文", "- 項目", "後"]
+    # 字のある行と一緒に選んだ字のない行（1行の空き）には付けない
+    window._load_text("一\n\n二")
+    window.text.tag_add("sel", "1.0", "3.end")
+    window.on_paragraph_kind("- ")
+    assert _lines(window, 1, 3) == ["- 一", "", "- 二"]
+    window.text.tag_remove("sel", "1.0", "end")
+    # Alt+Shift+← も、字のない行を見出しの記号だけの行にする（直前の見出しと同じレベル）
+    window._load_text("### 三\n")
+    window.text.mark_set("insert", "2.0")
+    window.on_outline(-1)
+    assert _lines(window, 2, 2) == ["### "] and window.text.index("insert") == "2.4"
+    window.on_outline(1)                             # 下げるのは、ふつうの見出しと同じ
+    assert _lines(window, 2, 2) == ["#### "]
+    window._load_text("### 三\n本文\n")
+    window.text.mark_set("insert", "2.0")
+    window.on_outline(1)                             # 本文を下げても、直前の見出しと同じレベル（2026-10-25 班長指示）
+    assert _lines(window, 2, 2) == ["### 本文"]
+    window.text.mark_set("insert", "3.0")
+    window.on_outline(1)                             # 字のない行も同じ
+    assert _lines(window, 3, 3) == ["### "]
+    window._load_text("# 第一\n")
+    window.text.mark_set("insert", "2.0")
+    window.on_outline(-1)
+    assert _lines(window, 2, 2) == ["# "]
+    window.on_outline(-1)                            # # から上げると、字のない行に戻る
+    assert _lines(window, 2, 2) == [""]
+    # 前に見出しがなければ、上げても下げても ##（［見出し］と同じ。2026-10-25 班長指示）
+    for step in (-1, 1):
+        window._load_text("前文\n")
+        window.text.mark_set("insert", "2.0")
+        window.on_outline(step)
+        assert _lines(window, 2, 2) == ["## "]
+        window.text.mark_set("insert", "1.0")
+        window.on_outline(step)                      # 本文の行も同じ
+        assert _lines(window, 1, 1) == ["## 前文"]
 
 
 def test_marks_are_blue(window):
@@ -582,10 +665,10 @@ def test_buttons_have_icons(window):
             yield from buttons(c)
     found = {str(b.cget("text")).replace("\n", ""): b for b in buttons(window)}
     for text in ("開く", "保存", "印刷", "閉じる", "コピーとして開く", "名前を付けて保存", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "字下げ", "インデント", "太字", "均等割付",
-                 "改ページ", "セクション区切り", "ヘッダー", "検索", "置換", "蛍光ペン", "幅に合わせる"):
+                 "見出し", "箇条書き", "段落番号", "改ページ", "セクション区切り", "ヘッダー", "検索", "置換", "蛍光ペン", "幅に合わせる"):
         assert found[text].cget("image"), text
-        # リボンの大きいボタン（AI 連携）はアイコンの下に字、ほかはアイコンの右に字
-        large = text in ("選択範囲を仮名化", "コピー", "貼り付け") and not window.ribbon.groups[1].compact
+        # リボンの大きいボタン（［選択範囲を仮名化］）はアイコンの下に字、ほかはアイコンの右に字
+        large = text == "選択範囲を仮名化"
         assert str(found[text].cget("compound")) == ("top" if large else "left"), text
     icon_only = [b for b in buttons(window) if not str(b.cget("text")) and b.cget("image")]
     assert len(icon_only) == 4
@@ -866,7 +949,7 @@ def test_header_footer_buttons(window):
     # ［ヘッダー］は「書式」の組の［インデント］の下（2026-10-25 班長指示）
     found = {str(b.cget("text")): b for b in _all_buttons(window)}
     head, indent = found["ヘッダー"], found["インデント"]
-    assert head.master is indent.master is window.ribbon.groups[2].body
+    assert head.master is indent.master is window.ribbon.groups[3].body
     assert head.grid_info()["column"] == indent.grid_info()["column"]
     assert int(head.grid_info()["row"]) == int(indent.grid_info()["row"]) + 1
     window._load_text("--: 事件番号\n担当\n# 認否\n主張は争う。")
@@ -1162,7 +1245,7 @@ def test_print_dialog_choices(window):
     assert results == [("B", None, 1, [0, 1, 2, 3, 4, 5]), ("B", None, 3, [1]), ("A", None, 1, [0, 1, 5])]
 
 def test_line_numbers_check(window, tmp_path):
-    """「書式」の［行番号］のチェックで行番号を付ける。構文ファイルの区切りの行に残し、内容証明では付けない
+    """「スタイル」の［行番号］のチェックで行番号を付ける。構文ファイルの区切りの行に残し、内容証明では付けない
     （VA公用文のセットアップと同じ。2026-10-24 班長指示）。"""
     from va_documake.doctypes import DOC_TYPES
     assert not window.line_numbers_var.get()

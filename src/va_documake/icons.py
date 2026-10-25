@@ -24,6 +24,7 @@ BUTTON_ICONS = {
     "コピーとして開く": "document_copy", "名前を付けて保存": "save_edit",
     "選択範囲を仮名化": "person_lock", "コピー": "copy", "貼り付け": "clipboard_paste",
     "表題": "document_title", "中央": "text_align_center", "右": "text_align_right", "字下げ": "text_first_line", "インデント": "text_indent_increase", "太字": "text_bold", "均等割付": "text_align_distributed", "傍点": "text_emphasis",
+    "見出し": "text_header_2", "箇条書き": "text_bullet_list_ltr", "段落番号": "text_number_list_ltr",
     "改ページ": "document_page_break", "セクション区切り": "document_split_hint", "目次": "text_bullet_list_square",
     "ヘッダー": "document_header",
     "パスをコピー": "copy", "検索": "search", "蛍光ペン": "highlight", "置換": "arrow_swap", "幅に合わせる": "arrow_autofit_width",
