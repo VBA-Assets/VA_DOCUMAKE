@@ -8,7 +8,7 @@ import unicodedata
 from dataclasses import dataclass, field, replace
 
 from .document import BLANK, BULLET, CENTER, FOOTER, HEADER, HEADING, NUMBER, PAGE_BREAK, RIGHT, SECTION_BREAK, TABLE
-from .document import TITLE, TOC, TOC_LEVELS, heading_label
+from .document import TITLE, TOC, TOC_LEVELS, heading_label, squeezed_numbers
 from .doctypes import (PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED, PAGE_NUMBER_BOTTOM_RIGHT,
                        PAGE_NUMBER_TOP_RIGHT, TITLE_CENTER, TITLE_JUSTIFY, TITLE_LEFT)
 
@@ -80,6 +80,7 @@ class Glyph:
     highlight: bool = False  # 蛍光ペン（==文字==。確認表示だけで黄色に塗る）
     dot: bool = False        # 傍点（*文字*。字の上に黒丸を付ける）
     pseudonym: bool = False  # 仮名化した語の字（確認表示だけで地に色を付ける。2026-10-24 班長指示）
+    scale: float = 1.0       # 字の横の倍率（複合見出しの外側の括弧の番号を全角1字の幅に縮める。2026-10-26）
 
 
 @dataclass
@@ -147,6 +148,29 @@ class Typesetter:
     def advance(self, ch):
         """1字の送り幅。全角は格子の1字（字送り）、半角はその半分。書体の字の幅には頼らない。"""
         return self.pitch / 2 if is_half(ch) else self.pitch
+
+    def glyph_w(self, g):
+        """描いた字の幅（横の倍率を掛けたもの）。"""
+        return self.advance(g.ch) * g.scale
+
+    def squeeze_items(self, s):
+        """番号を全角1字の幅に収めた (字, 送り幅) の列。括弧の番号（「(3)」「（ア）」）は、括弧をそれぞれ 1/4 字、中の字に
+        残りの 1/2 字を分ける（VA疑似アウトラインの FontMag と同じ割り振り）。ほかの番号（「第１」「１１」「a」）は、
+        字の幅の割合のまま1字に収める（1字より狭い「a」は、1字の幅の中ほどに描く。place_number_glyphs）。"""
+        if len(s) >= 3 and s[0] in "(（" and s[-1] in ")）":
+            inner = len(s) - 2
+            return ([(s[0], self.pitch / 4)] + [(ch, self.pitch / 2 / inner) for ch in s[1:-1]]
+                    + [(s[-1], self.pitch / 4)])
+        natural = sum(self.advance(ch) for ch in s)
+        return [(ch, self.advance(ch) * self.pitch / natural) for ch in s]
+
+    def place_number_glyphs(self, glyphs, chars):
+        """番号の字の横の倍率と位置を、送り幅に合わせる。送り幅が字の幅より狭ければ縮め、広ければ（1字に収めた「a」）
+        縮めずに送り幅の中ほどに置く。"""
+        for g, (_, w) in zip(glyphs, chars):
+            adv = self.advance(g.ch)
+            g.scale = min(1.0, w / adv)
+            g.x += (w - adv * g.scale) / 2
 
     def word_char(self, ch):
         """英数字の語を作る字（半角で、空白でないもの）か。均等割付の字の並び（2字以上の項目）は語の字ではない。"""
@@ -381,22 +405,26 @@ class Typesetter:
                 self.first_level = p.level
             if p.composite:
                 continue            # 複合見出し：次の見出しと1行にまとめる
-            number, merged, outer = p.number, 0, p
+            number, merged, outer, squeeze = p.number, 0, p, ()
             if p.kind == HEADING:
                 _, number, merged, outer = heading_label(paras, pi)
+                squeeze = squeezed_numbers(paras, pi)
             left, first, right = self.indents(outer)
             # 複合見出しは外側の見出しの位置から書き出し、折り返した行は、まとめた段の数だけ右から始める
             left, first = left + merged * self.pitch, first - merged * self.pitch
             shift = len(number)
             items = self.make_items(number + p.text, [(a + shift, b + shift, n) for a, b, n in p.distribute],
                                     self.text_w - right - left - max(first, 0.0))
+            for a, b in squeeze:
+                items[a:b] = self.squeeze_items(number[a:b])
             num_left = len(number)
             offset = len(p.number) - len(number)      # 字の番号は、この見出しの番号の1字目を 0 とする（前の番号は負）
             for start_x, chars, hang, last, trail in self.break_lines(items, left, first, right):
                 num_here = min(num_left, len(chars))
                 placed = self.place_line(p.align, start_x, chars, hang, last, trail, num_here, right)
-                out.append(Line(row // self.lines_page + 1, row % self.lines_page,
-                                [Glyph(ch, x, k < num_here, offset + k) for k, (ch, x) in enumerate(placed)], pi))
+                glyphs = [Glyph(ch, x, k < num_here, offset + k) for k, (ch, x) in enumerate(placed)]
+                self.place_number_glyphs(glyphs[:num_here], chars)
+                out.append(Line(row // self.lines_page + 1, row % self.lines_page, glyphs, pi))
                 offset += sum(len(ch) for ch, _ in chars)
                 num_left -= num_here
                 row += 1

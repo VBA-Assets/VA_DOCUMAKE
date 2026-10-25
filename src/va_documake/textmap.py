@@ -86,7 +86,7 @@ class LayoutMap:
             top, height = ts.line_box(target)
             return target.page - 1, ts.margin_left, top, height
         g = min(target.glyphs, key=lambda g: abs(g.index - idx))
-        x = g.x + (ts.advance(g.ch) if idx > g.index else 0)
+        x = g.x + (ts.glyph_w(g) if idx > g.index else 0)
         top, height = ts.line_box(target)
         return target.page - 1, ts.margin_left + x, top, height
 
@@ -124,8 +124,8 @@ class LayoutMap:
             return 0 if top <= y < top + height else min(abs(y - top), abs(y - top - height))
         ln = min(on_page, key=dist)
         rel = x - ts.margin_left
-        g = min(ln.glyphs, key=lambda g: abs(g.x + ts.advance(g.ch) / 2 - rel))
-        idx = g.index + (1 if rel > g.x + ts.advance(g.ch) / 2 else 0)
+        g = min(ln.glyphs, key=lambda g: abs(g.x + ts.glyph_w(g) / 2 - rel))
+        idx = g.index + (1 if rel > g.x + ts.glyph_w(g) / 2 else 0)
         p = self.paras[ln.para_index]
         col = p.source_col(idx - len(p.number))
         return self._orig(p.src_line, col)

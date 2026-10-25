@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 import fitz  # PyMuPDF
 
-from .doctypes import DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_NONE
+from .doctypes import PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_NONE, doc_type_for
 from .document import FOOTER, HEADER, SECTION_BREAK, TABLE, TOC, parse
 from .document import heading_label
 from .layout import _NAIYOU, toc_entries
@@ -359,7 +359,8 @@ def rebuild_dictionary(content, pdf_path, doc_type=None):
     if doc_type is None:
         doc_type = content.settings.doc_type if content.settings else "Saiban"
     page_number = content.settings.page_number if content.settings else PAGE_NUMBER_BOTTOM_CENTER
-    r = recover(content.body, pdf_path, DOC_TYPES[doc_type], page_number)
+    one_width = content.settings.one_width if content.settings else False
+    r = recover(content.body, pdf_path, doc_type_for(doc_type, one_width), page_number)
     d = Dictionary()
     for m in TOKEN_RE.finditer(content.body_text):
         d.note_used(m.group(0))

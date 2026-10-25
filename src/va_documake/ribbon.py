@@ -69,12 +69,6 @@ class RibbonGroup(ttk.Frame):
         widget.grid(in_=self.body, row=0, column=self._column, rowspan=ROWS, sticky="nw", padx=(1, 6), pady=(1, 0))
 
 
-def set_accent(button, on):
-    """リボンのボタンの枠をアクセント色にする・戻す（大きいボタンでも、小さいボタンでも）。"""
-    base = str(button.cget("style")).removeprefix("Accent.") or "RibbonLarge.TButton"
-    button.configure(style=("Accent." + base) if on else base)
-
-
 class Ribbon(ttk.Frame):
     """組を左から並べる。幅に入りきらない組は次の段に送る。"""
 

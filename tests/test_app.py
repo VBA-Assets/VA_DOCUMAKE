@@ -288,16 +288,13 @@ def test_find_and_replace(window):
     assert not window.text.tag_ranges("found")
 
 
-def test_save_button_is_accent_only_when_modified(window, tmp_path):
-    """［保存］は、保存していない変更があるときだけ青い枠（Accent.Ribbon.TButton）にする。"""
+def test_save_button_is_always_plain(window, tmp_path):
+    """［保存］は、保存していない変更があっても青い枠にしない（2026-10-26 班長決定）。変更は題の「＊」で示す。"""
     window.session.pdf_path = tmp_path / "準備書面.pdf"
     window._update_title()
-    assert str(window.save_button.cget("style")) == "Accent.Ribbon.TButton"      # まだ保存していない
+    assert str(window.save_button.cget("style")) == "Ribbon.TButton" and window.title().startswith("＊")
     assert window.on_save()
-    assert str(window.save_button.cget("style")) == "Ribbon.TButton"
-    window.text.insert("end", "追記。")
-    window.on_text_modified()
-    assert str(window.save_button.cget("style")) == "Accent.Ribbon.TButton"
+    assert str(window.save_button.cget("style")) == "Ribbon.TButton" and not window.title().startswith("＊")
 
 
 def test_ribbon_groups_and_reflow(window):
@@ -589,12 +586,19 @@ def test_print_to_pdf_printer(window, tmp_path, monkeypatch, quiet_faulthandler)
         names.append(name)
         return real_print(data, dc, name, pages, output=str(out), progress=progress)
     monkeypatch.setattr(printing, "print_pdf", to_file)
+    # 保存していない変更があれば、先に保存する（2026-10-26 班長指示）。保存先を選ばなければ印刷しない
+    from tkinter import filedialog
+    monkeypatch.setattr(filedialog, "asksaveasfilename", lambda *a, **k: "")
     window.on_print()
-    assert names == ["VA DocuMake"]          # 保存していない文書は「VA DocuMake」
-    window.session.pdf_path = tmp_path / "準備書面（１）.pdf"
+    assert not names and not chosen and window.session.version == 0
+    monkeypatch.setattr(filedialog, "asksaveasfilename", lambda *a, **k: str(tmp_path / "準備書面（１）.pdf"))
+    window.on_print()
+    assert names == ["準備書面（１）"]       # 印刷の文書の名前は、Word と同じく PDF のファイル名
+    assert window.session.version == 1 and (tmp_path / "準備書面（１）.pdf").exists()
+    assert window.status.cget("text") == "版 1 を保存し、1 ページをプリンターに送りました。"   # 保存したことも出す
     names.clear()
-    window.on_print()
-    assert names == ["準備書面（１）"]       # 保存した文書は、Word と同じく PDF のファイル名
+    window.on_print()                        # 保存していない変更がなければ、保存しない
+    assert names == ["準備書面（１）"] and window.session.version == 1
     for _ in range(50):
         if out.exists() and out.stat().st_size:
             break
@@ -1294,6 +1298,15 @@ def test_close_document_starts_new_one(window, monkeypatch):
     assert not window.tree.get_children()
 
 
+def test_save_dialog_title(window, monkeypatch):
+    """新しい文書を保存するときの保存先の画面の題は「書式付き（PDF）ファイルの保存先」（2026-10-26 班長指示）。"""
+    from tkinter import filedialog
+    titles = []
+    monkeypatch.setattr(filedialog, "asksaveasfilename", lambda *a, **k: titles.append(k.get("title")) or "")
+    assert not window.on_save()                                     # 保存先を選ばなければ保存しない
+    assert titles == ["書式付き（PDF）ファイルの保存先"]
+
+
 def test_config_rejects_out_of_range_options():
     cfg = app.config.AppConfig(editor_font_size=99, editor_line_spacing_pt=-3, editor_font_family=5)
     assert (cfg.editor_font_size, cfg.editor_line_spacing_pt, cfg.editor_font_family) == (11, 6, "")
@@ -1399,6 +1412,41 @@ def test_line_numbers_check(window, tmp_path):
     window.doc_type_box.set(DOC_TYPES["Saiban"].label)
     window.on_settings_changed()
     assert str(window.line_numbers_check.cget("state")) == "normal" and not window.session.settings.line_numbers
+
+def test_one_width_check(window, tmp_path):
+    """「スタイル」の［番号1字］のチェックで、見出し番号を全角1字の幅に縮める。構文ファイルの区切りの行に残し、
+    契約書1・技術文書では使えない（2026-10-26 班長指示）。"""
+    from va_documake.doctypes import DOC_TYPES
+    window.text.delete("1.0", "end")
+    window.text.insert("1.0", "#\n## 当事者\n## 次")
+    window.refresh()
+    assert not window.one_width_var.get() and not window.session.doc_type.one_width
+    window.one_width_check.invoke()
+    assert window.session.settings.one_width and window.cfg.one_width and window.session.doc_type.one_width
+    assert "".join(g.ch for g in window.session.layout_map.lines[0].glyphs).startswith("第１１　当事者")
+    window.session.pdf_path = tmp_path / "準備書面.pdf"
+    assert window.on_save()
+    assert "番号1字 あり" in window.session.vadm_path.read_text(encoding="utf-8")
+    window.doc_type_box.set(DOC_TYPES["Technical"].label)
+    window.on_settings_changed()
+    assert not window.session.settings.one_width and not window.one_width_var.get()
+    assert str(window.one_width_check.cget("state")) == "disabled"
+    window.doc_type_box.set(DOC_TYPES["Saiban"].label)
+    window.on_settings_changed()
+    assert str(window.one_width_check.cget("state")) == "normal" and not window.session.settings.one_width
+
+
+def test_copy_vadm_saves_first_and_tells(window, tmp_path, monkeypatch):
+    """［コピー］は、保存していない変更があれば先に保存し、保存したことも下の欄に出す（2026-10-26 班長指摘）。"""
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+    window.session.pdf_path = tmp_path / "準備書面.pdf"
+    window.on_copy_vadm()
+    assert window.session.version == 1
+    assert window.status.cget("text").startswith("版 1 を保存し、AI に渡す構文ファイル")
+    assert window.clipboard_get() == window.session.vadm_path.read_text(encoding="utf-8")
+    window.on_copy_vadm()                    # 保存していない変更がなければ、保存しない
+    assert window.session.version == 1 and window.status.cget("text").startswith("AI に渡す構文ファイル")
+
 
 def test_copy_vadm_path(window, tmp_path):
     """［パスをコピー］で構文ファイルのフルパスをコピーする（保存するまでは押せない。2026-10-24 班長指示）。"""

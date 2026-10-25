@@ -106,16 +106,19 @@ class AiMixin:
     def on_copy_vadm(self):
         """構文ファイルの中身をクリップボードに写す（直していれば、先に保存する）。"""
         text = self.real_text()
+        saved = ""
         if self.session.is_modified(text) or self.session.version == 0 or not self.session.vadm_path.exists():
             if not messagebox.askyesno(APP_NAME, "構文ファイルをコピーする前に、書式付きファイル（PDF）と構文ファイルを保存します。"
                                        "よろしいですか？", parent=self):
                 return
             if not self.on_save():
                 return
+            # 保存したことも、コピーの知らせと一緒に下の欄に出す（2026-10-26 班長指摘）
+            saved = f"版 {self.session.version} を保存し、"
         data = self.session.vadm_path.read_text(encoding="utf-8")
         self.clipboard_clear()
         self.clipboard_append(data)
-        self.status.configure(text="AI に渡す構文ファイル（仮名化済み）の中身をコピーしました。AI のチャット画面に貼り付けてください。")
+        self.status.configure(text=f"{saved}AI に渡す構文ファイル（仮名化済み）の中身をコピーしました。AI のチャット画面に貼り付けてください。")
 
     def on_copy_path(self):
         """構文ファイルのフルパスをクリップボードに写す（2026-10-24 班長指示）。保存していなければ写さない。"""

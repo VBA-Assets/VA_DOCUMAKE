@@ -210,8 +210,9 @@ class FileMixin:
         return text
 
     def _ask_pdf_path(self):
+        # 画面の題は、画面の「書式付き（PDF）ファイル」の呼び方にそろえる（2026-10-26 班長指示）
         while True:
-            path = filedialog.asksaveasfilename(parent=self, title="PDF の保存先", defaultextension=".pdf",
+            path = filedialog.asksaveasfilename(parent=self, title="書式付き（PDF）ファイルの保存先", defaultextension=".pdf",
                                                 filetypes=[("PDF", "*.pdf")])
             if not path:
                 return None
@@ -223,15 +224,23 @@ class FileMixin:
             return path
 
     def on_print(self):
-        """確認表示と同じページを、プリンターに実際のサイズ（A4）で印刷する。保存していなくても印刷できる。"""
+        """確認表示と同じページを、プリンターに実際のサイズ（A4）で印刷する。保存していない変更があれば、先に保存する
+        （印刷したものと、保存した書式付きファイル〔PDF〕が違わないように。2026-10-26 班長指示。それまでは保存しなくても
+        印刷できた）。保存をやめたら印刷しない。"""
         if not printing.available():
             # Windows だけ（Mac などでは［印刷］を押せない。Ctrl+P も効かせない）。保存した PDF を、PDF のソフトで印刷する
             messagebox.showinfo(APP_NAME, "この PC では、VA DocuMake から印刷できません。保存した PDF を開いて印刷してください。",
                                 parent=self)
             return
         text = self.real_text()
-        text = self._guard_tokens(text)
-        if text is None:
+        saved = ""
+        if self.session.is_modified(text):
+            if not self.on_save():                      # 記号・区切りの行の確かめも、保存のときに行う
+                return
+            text = self.real_text()
+            # 保存したことは、印刷の知らせと一緒に下の欄に出す（印刷の途中の知らせで上書きされるため。2026-10-26 班長指摘）
+            saved = f"版 {self.session.version} を保存し、"
+        elif self._guard_tokens(text) is None:
             return
         try:
             data = self.session.preview_pdf(text)
@@ -268,7 +277,7 @@ class FileMixin:
             return
         finally:
             self.configure(cursor="")
-        self.status.configure(text=f"{n} ページをプリンターに送りました。")
+        self.status.configure(text=f"{saved}{n} ページをプリンターに送りました。")
 
     def _confirm_forget_dictionary(self, action):
         """仮名化した語の一覧（実名と記号の対応）があれば、消えることを確かめる。続けてよければ True。"""

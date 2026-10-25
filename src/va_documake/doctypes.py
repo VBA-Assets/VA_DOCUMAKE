@@ -2,7 +2,7 @@
 
 VA公用文の版が上がって値が変わったら、ここを写し直す。値の意味は cstSettings.bas の冒頭の説明と同じ。
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 # 番号スタイル（VA公用文の値）→ 字の種類
 _STYLE = {14: "fw", 0: "hw", 20: "kana", 12: "hwkana", 4: "alpha", 2: "roman", 18: "circled"}
@@ -34,6 +34,7 @@ class DocType:
     list_number_style: str = "circled"
     list_left: int = 1              # リストの、見出しからの左インデントの増加量（字）
     list_first: int = -1            # リストの最初の行のインデント（字）
+    one_width: bool = False         # 見出し番号を全角1字の幅に縮める（one_width_type。2026-10-26 班長指示）
 
 
 def _styles(s):
@@ -77,6 +78,31 @@ DOC_TYPES = {d.key: d for d in (
             (0,) * 9, (0,) * 9, (0,) * 9, (0,) * 9, 0, TITLE_LEFT, 0,
             list_bullet="-", list_number="%1)", list_number_style="alpha", list_left=0, list_first=0),
 )}
+
+
+
+def can_one_width(dt):
+    """見出し番号を1字の幅にできる文書の種類か（左インデントの増加量が1字のもの。契約書1・技術文書は「第12条」
+    「1.2.3.」のような番号で1字に収まらず、複合見出しも使えないので、できないことにする）。"""
+    return dt.left_add == 1
+
+
+def one_width_type(dt):
+    """見出し番号を全角1字の幅に縮める書式（VA疑似アウトラインの「数字を全角1文字扱いにする」と同じ形。2026-10-26
+    班長指示。複合見出しで、番号の幅がそろわないと上下の字がそろわないため）。番号の後ろは全角空白にし、見出しの
+    最初の行のインデントはどの段も -1 字にする（番号1字＋空白1字の後から本文が始まり、折り返した行は番号の
+    1字右から始まる）。番号の字を縮めるのは行組み（layout.Typesetter.squeeze_items）で行う。"""
+    if not can_one_width(dt):
+        return dt
+    formats = tuple(f.rstrip(" 　") + "　" if f else f for f in dt.number_formats)
+    return replace(dt, number_formats=formats, heading_first=(-1,) * 9, one_width=True)
+
+
+def doc_type_for(key, one_width=False):
+    """文書の種類のキーと、見出し番号を1字の幅にするかから、書式を返す。"""
+    dt = DOC_TYPES[key]
+    return one_width_type(dt) if one_width else dt
+
 
 # ページ番号の位置（VA公用文 basSetup.ConfigHeaderFooter の選択肢）
 PAGE_NUMBER_NONE, PAGE_NUMBER_TOP_RIGHT = "None", "TopRight"

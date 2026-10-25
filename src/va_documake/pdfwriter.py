@@ -89,11 +89,18 @@ def _has_bold(ts, lines):
 
 
 def _draw_glyph(c, x, y, g):
-    """字を描く。太字の字はゴシック（ＭＳ ゴシック、Mac などでは IPAゴシック）で描き、書体を戻す。"""
+    """字を描く。太字の字はゴシック（ＭＳ ゴシック、Mac などでは IPAゴシック）で描き、書体を戻す。横の倍率のある字
+    （複合見出しの外側の括弧の番号）は、倍率を掛けて描く。"""
     if g.bold:
         c.setFont(c.vadm_fonts[1], FONT_SIZE)
         c.drawString(x, y, g.ch)
         c.setFont(c.vadm_fonts[0], FONT_SIZE)
+    elif getattr(g, "scale", 1.0) != 1.0:     # 表の字（TableGlyph）には倍率がない
+        t = c.beginText(x, y)
+        t.setHorizScale(g.scale * 100)
+        t.textOut(g.ch)
+        t.setHorizScale(100)            # 倍率は BT〜ET の外にも残るので、後の字のために戻す
+        c.drawText(t)
     else:
         c.drawString(x, y, g.ch)
 

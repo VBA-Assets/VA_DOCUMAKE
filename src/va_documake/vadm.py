@@ -94,6 +94,7 @@ class Settings:
     doc_type: str = "Saiban"                     # DOC_TYPES のキー
     page_number: str = PAGE_NUMBER_BOTTOM_CENTER  # PAGE_NUMBER_* のいずれか
     line_numbers: bool = False                   # 行番号を付けるか（2026-10-24 班長指示）
+    one_width: bool = False                      # 見出し番号を全角1字の幅に縮めるか（doctypes.one_width_type。2026-10-26 班長指示）
 
 
 @dataclass
@@ -140,7 +141,8 @@ def separator_line(doc_id, version, settings):
     dt = DOC_TYPES[settings.doc_type]
     return (f"==== VA DocuMake 文書ID {doc_id} 版 {version} "
             f"種類 {dt.label} ページ番号 {PAGE_NUMBER_LABELS[settings.page_number]} "
-            f"行番号 {'あり' if settings.line_numbers else 'なし'} ====")
+            f"行番号 {'あり' if settings.line_numbers else 'なし'} "
+            f"番号1字 {'あり' if settings.one_width else 'なし'} ====")
 
 
 def parse_separator(line):
@@ -154,8 +156,9 @@ def parse_separator(line):
     by_label = {d.label: d.key for d in DOC_TYPES.values()}
     if pairs.get("種類") in by_label:
         page = {v: k for k, v in PAGE_NUMBER_LABELS.items()}.get(pairs.get("ページ番号"), PAGE_NUMBER_BOTTOM_CENTER)
-        # 行番号の書いていない区切りの行（2026-10-24 より前の構文ファイル）は「なし」
-        settings = Settings(by_label[pairs["種類"]], page, pairs.get("行番号") == "あり")
+        # 行番号の書いていない区切りの行（2026-10-24 より前の構文ファイル）は「なし」。番号1字も、書いていなければ
+        # （Ver152 までの構文ファイル）「なし」
+        settings = Settings(by_label[pairs["種類"]], page, pairs.get("行番号") == "あり", pairs.get("番号1字") == "あり")
     return m.group(1), int(m.group(2)), settings
 
 

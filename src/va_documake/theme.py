@@ -108,8 +108,7 @@ def apply_theme(root):
     # 配置などの小さいボタン
     style.configure("Small.TButton", padding=(8, 1), width=-4)
     # リボンのボタン（Word のリボンと同じく、ふだんは枠も地もなく、重ねたときだけ淡い青の地と枠。班長の UI 方針の
-    # 「常時、細い枠線」の、このツールだけの例外。2026-10-24 班長決定）。保存していない変更があるときの［保存］は、
-    # 枠をアクセント色にする（Accent.RibbonLarge.TButton）
+    # 「常時、細い枠線」の、このツールだけの例外。2026-10-24 班長決定）
     ribbon_states = dict(
         background=[("disabled", WINDOW_BG), ("pressed", PRESSED_BG), ("active", HOVER_BG)],
         lightcolor=[("disabled", WINDOW_BG), ("pressed", PRESSED_BG), ("active", HOVER_BG)],
@@ -120,9 +119,6 @@ def apply_theme(root):
                         darkcolor=WINDOW_BG, padding=padding, width=0, anchor="w" if name == "Ribbon.TButton" else "center",
                         justify="center")
         style.map(name, **ribbon_states)
-    for name in ("Accent.RibbonLarge.TButton", "Accent.Ribbon.TButton"):
-        style.configure(name, bordercolor=ACCENT)
-        style.map(name, bordercolor=[("disabled", WINDOW_BG), ("!disabled", ACCENT)])
     style.configure("Ribbon.TFrame", background=WINDOW_BG)
     style.configure("Ribbon.TLabel", background=WINDOW_BG)
     style.configure("RibbonGroup.TLabel", background=WINDOW_BG, foreground=NOTE, padding=(0, 0, 0, 2))

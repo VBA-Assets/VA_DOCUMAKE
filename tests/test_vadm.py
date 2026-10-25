@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from va_documake import vadm
-from va_documake.doctypes import DOC_TYPES, PAGE_NUMBER_TOP_RIGHT
+from va_documake.doctypes import DOC_TYPES, PAGE_NUMBER_TOP_RIGHT, doc_type_for
 from va_documake.document import parse
 from va_documake.layout import Typesetter
 from va_documake.pdfwriter import write_pdf
@@ -27,7 +27,7 @@ def test_doc_id():
 def test_build_and_read_back(tmp_path):
     settings = vadm.Settings("Keiyaku1", PAGE_NUMBER_TOP_RIGHT)
     text = vadm.build("K7Q29XMD", 3, settings, ":=: 契約書\n# 目的\n〔人名Ａ〕は、\n\n")
-    sep = "==== VA DocuMake 文書ID K7Q29XMD 版 3 種類 契約書1（法令型） ページ番号 右上 行番号 なし ===="
+    sep = "==== VA DocuMake 文書ID K7Q29XMD 版 3 種類 契約書1（法令型） ページ番号 右上 行番号 なし 番号1字 なし ===="
     assert sep in text.splitlines()
     path = tmp_path / "K7Q29XMD.vadm"
     vadm.write_file(path, text)
@@ -40,6 +40,10 @@ def test_build_and_read_back(tmp_path):
     on = vadm.Settings("Saiban", PAGE_NUMBER_TOP_RIGHT, True)
     assert vadm.parse_separator(vadm.separator_line("K7Q29XMD", 1, on))[2] == on
     assert not vadm.parse_separator(sep.replace(" 行番号 なし", ""))[2].line_numbers
+    # 見出し番号を1字の幅にするか（2026-10-26）。書いていない区切りの行（Ver152 までの構文ファイル）は「なし」
+    one = vadm.Settings("Saiban", PAGE_NUMBER_TOP_RIGHT, False, True)
+    assert vadm.parse_separator(vadm.separator_line("K7Q29XMD", 1, one))[2] == one
+    assert not vadm.parse_separator(sep.replace(" 番号1字 なし", ""))[2].one_width
 
 
 def test_old_separator_without_settings():
@@ -120,9 +124,9 @@ WORDS = [("甲野太郎", "人名"), ("乙山商事株式会社", "法人"), ("�
          ("戊村四郎", "人名"), ("原告", "その他")]
 
 
-def save_pair(tmp_path, real_lines, doc_type="Saiban", page_number=None, words=WORDS, version=5):
+def save_pair(tmp_path, real_lines, doc_type="Saiban", page_number=None, words=WORDS, version=5, one_width=False):
     """実名の文章から、同じ版の PDF と構文ファイルを作る（VA DocuMakeの［保存］と同じ）。"""
-    dt = DOC_TYPES[doc_type]
+    dt = doc_type_for(doc_type, one_width)
     d = Dictionary()
     for w, k in words:
         d.register(w, k)
@@ -131,7 +135,7 @@ def save_pair(tmp_path, real_lines, doc_type="Saiban", page_number=None, words=W
     pdf = tmp_path / "実名.pdf"
     kw = {"page_number": page_number} if page_number else {}
     write_pdf(ts, lines, str(pdf), doc_id="K7Q29XMD", version=version, **kw)
-    settings = vadm.Settings(doc_type, page_number or vadm.Settings().page_number)
+    settings = vadm.Settings(doc_type, page_number or vadm.Settings().page_number, one_width=one_width)
     text = vadm.build("K7Q29XMD", version, settings, d.pseudonymize("\n".join(real_lines)))
     return d, pdf, vadm.parse_text(text)
 
@@ -299,6 +303,18 @@ def test_rebuild_with_composite_heading(tmp_path):
     """複合見出し（番号が続けて並ぶ）と目次があっても、突き合わせで記号の元の語が求まる。"""
     real = ["[TOC]", "<<<", "#", "## 甲野太郎の主張", "本文。", "#", "## 乙山商事株式会社の反論", "反論する。"]
     original, pdf, content = save_pair(tmp_path, real)
+    d, r = rebuild_dictionary(content, pdf)
+    assert r.exact and not r.missing
+    assert d.restore(content.body_text)[0] == "\n".join(real)
+
+
+def test_rebuild_with_one_width_numbers(tmp_path):
+    """見出し番号を1字の幅に縮めた文書（2026-10-26）でも、突き合わせで記号の元の語が求まる。番号1字は区切りの行から
+    読むので、構文ファイルの設定のとおりに組み直して突き合わせる。"""
+    real = ["[TOC]", "#", "## 甲野太郎の主張", "### 乙山商事株式会社の反論", "本文。", "##", "### 甲野太郎", "####",
+            "##### 乙山商事株式会社"]
+    original, pdf, content = save_pair(tmp_path, real, one_width=True)
+    assert content.settings.one_width
     d, r = rebuild_dictionary(content, pdf)
     assert r.exact and not r.missing
     assert d.restore(content.body_text)[0] == "\n".join(real)

@@ -32,6 +32,7 @@ class AppConfig:
     doc_type: str = "Saiban"
     page_number: str = PAGE_NUMBER_BOTTOM_CENTER
     line_numbers: bool = False      # 行番号（新しい文書の既定。2026-10-24 班長指示）
+    one_width: bool = False         # 見出し番号を1字の幅に縮める（新しい文書の既定。2026-10-26 班長指示）
     vadm_folder: str = ""
     pdf_folders: list = field(default_factory=list)   # 新しく使ったものが先
     # 前回終了したときのウィンドウ（2026-10-23 班長指示：起動時に元に戻す）
@@ -51,6 +52,8 @@ class AppConfig:
             self.page_number = PAGE_NUMBER_BOTTOM_CENTER
         if not isinstance(self.line_numbers, bool):
             self.line_numbers = False
+        if not isinstance(self.one_width, bool):
+            self.one_width = False
         if not self.vadm_folder:
             self.vadm_folder = str(default_folder())
         if not isinstance(self.editor_font_size, int) or not FONT_SIZE_RANGE[0] <= self.editor_font_size <= FONT_SIZE_RANGE[1]:

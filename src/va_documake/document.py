@@ -3,9 +3,10 @@
 対応する書き方（VA公用文の ai-prompt.md と同じ形に、配置などの記号を足したもの）
 ・見出し：行頭の `#`〜`#########`＋半角空白。階層は `#` の数。
 ・複合見出し：字のない見出しの行（`#` だけ、または `# ` だけ）のすぐ後に見出しが続くと、2つを1行にまとめる
-  （「第１　１　当事者」。VA疑似アウトラインの複合見出しと同じ。2026-10-24 班長指示）。番号を続けて並べ、1行目は外側の
-  見出しの位置から書き出し、折り返した行は、まとめた段の数だけ外側の見出しより右から始める。目次には、外側の段の
-  1項目として載せる。左インデントの増加量（left_add）が1字でない文書の種類では、まとめない（VA疑似アウトラインと同じ）。
+  （「１(1) 当事者」。VA疑似アウトラインの複合見出しと同じ。2026-10-24 班長指示）。番号を続けて並べ（外側の番号の後の
+  全角空白を除く。「第」の番号は空白を残す。［番号1字］の文書では、番号を全角1字の幅に縮め、後ろの空白を
+  除く。2026-10-26）、1行目は外側の見出しの位置から書き出し、折り返した行は、まとめた段の数だけ外側の見出しより
+  右から始める。目次には、外側の段の1項目として載せる。左インデントの増加量（left_add）が1字でない文書の種類では、まとめない（VA疑似アウトラインと同じ）。
 ・箇条書き：`- `。段落番号：`1. `（連番。① ② … にする）。
   記号の後に半角空白があるときだけ見出し・箇条書き・段落番号とする（2026-10-23 班長決定。VA公用文は空白が
   なくても記号とみなすが、「-1度」「2026.10.23」で始まる段落の字が消えるので、安全側にした）。
@@ -240,17 +241,52 @@ def has_inline_marks(s):
     return "*" in s or "==" in s or "]{" in s
 
 
-def heading_label(paras, pi):
-    """見出しの (段, 番号, まとめた段の数, 外側の見出し)。複合見出し（字のない見出しの行のすぐ後の見出し）は、前の字の
-    ない見出しの番号を前に付け、段は外側（いちばん前）の見出しの段にする。"""
+def _outer_number(number, one_width=False):
+    """複合見出しで、次の段の番号の前に付ける外側の番号。後ろの全角空白を1つ取り除く（「１　」→「１」。VA疑似アウトラインの
+    ProcessCompositeHeadings と同じ。2026-10-26 班長指摘）。半角空白（「(3) 」）は残す。「第」で始まる番号は、「第１１」と
+    読めないよう空白を残す（「第１　１　当事者」。2026-10-26 班長決定）。見出し番号を1字の幅に縮める文書では、どの番号も
+    （「第１」も）1字に縮めて、後ろの空白を取り除く（上下の字をそろえるため。2026-10-26 班長指示）。"""
+    if one_width:
+        return number.rstrip(" 　")
+    if number.startswith("第") or not number.endswith("　"):
+        return number
+    return number[:-1]
+
+
+def _composite_parts(paras, pi):
+    """見出しの番号を、外側の段から順に並べたもの（複合見出しでなければ、その見出しの番号だけ）と、外側の見出し。"""
     p = paras[pi]
-    number, level, merged, outer = p.number, p.level, 0, p
+    parts, outer = [p.number], p
     j = pi - 1
     while j >= 0 and paras[j].composite:
-        number, level, outer = paras[j].number + number, paras[j].level, paras[j]
-        merged += 1
+        parts.insert(0, _outer_number(paras[j].number, p.one_width))
+        outer = paras[j]
         j -= 1
-    return level, number, merged, outer
+    return parts, outer
+
+
+def heading_label(paras, pi):
+    """見出しの (段, 番号, まとめた段の数, 外側の見出し)。複合見出し（字のない見出しの行のすぐ後の見出し）は、前の字の
+    ない見出しの番号を前に付け（_outer_number）、段は外側（いちばん前）の見出しの段にする。"""
+    parts, outer = _composite_parts(paras, pi)
+    return outer.level, "".join(parts), len(parts) - 1, outer
+
+
+def squeezed_numbers(paras, pi):
+    """見出しの番号（heading_label の番号）のうち、全角1字の幅に縮めて描く番号の (始め, 終わり)。縮めるのは、見出し番号を
+    1字の幅に縮める文書（Para.one_width。［番号1字］。2026-10-26 班長指示）の見出しだけで、まとめない見出しも複合見出しも、
+    段ごとの番号を縮める。［番号1字］を付けない文書では、複合見出しでも縮めない（VA公用文と同じ幅。Ver152 は複合見出しの
+    括弧の番号だけを縮めたが、上下でそろわないので取りやめた。2026-10-26 班長指示）。"""
+    if not paras[pi].one_width:
+        return []
+    parts, _ = _composite_parts(paras, pi)
+    spans, end = [], 0
+    for part in parts:
+        core = part.rstrip(" 　")
+        if core:
+            spans.append((end, end + len(core)))
+        end += len(part)
+    return spans
 
 
 def line_mark(s):
@@ -299,6 +335,7 @@ class Para:
     src_cols: list = None           # 本文の各字が元の行の何字目か（＋末尾）。太字の記号を除いたので、src_col からの通しではない
     composite: bool = False         # 字のない見出しで、次の見出しと1行にまとめるもの（複合見出しの外側の段）
     area: str = None                # ヘッダー・フッターの段落なら HEADER・FOOTER（本文の行を使わない）
+    one_width: bool = False         # 見出し番号を全角1字の幅に縮める文書の見出しか（doctypes.one_width_type）
 
     def text_index(self, col):
         """元の行の col 字目 → 本文の何字目か。"""
@@ -542,7 +579,7 @@ def parse(lines, dt):
             num = dt.number_formats[level - 1]
             for k in range(9):
                 num = num.replace(f"%{k + 1}", number_text(dt.number_styles[k], counters[k]) if counters[k] else "")
-            p = Para(line, kind=HEADING, level=level, number=num)
+            p = Para(line, kind=HEADING, level=level, number=num, one_width=dt.one_width)
             current = level
         elif not stopped and left_indent is None and line.startswith("- "):
             seen = True

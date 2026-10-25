@@ -16,14 +16,14 @@ from tkinter import ttk
 
 from . import APP_NAME, __version__, config, ime, naiyou, printing, theme, tooltip, vadm
 from .ai_ops import AiMixin
-from .doctypes import DOC_TYPES, PAGE_NUMBER_LABELS
+from .doctypes import DOC_TYPES, PAGE_NUMBER_LABELS, can_one_width
 from .document import (BULLET_MARK, CENTER_MARK, HEADER_MARK, HEADING_BUTTON_MARK, INDENT_MARK, NUMBER_MARK,
                        PAGE_BREAK_MARK, RIGHT_MARK, SECTION_BREAK_MARK, TITLE_MARK, TOC_MARK)
 from .dialogs import OptionsDialog
 from .editor_ops import EditorMixin
 from .file_ops import FileMixin
 from .icons import IconSet
-from .ribbon import Ribbon, labeled_rows, set_accent
+from .ribbon import Ribbon, labeled_rows
 from .preview import PREVIEW_SCROLL_STEP, PreviewMixin
 from .session import Session
 
@@ -266,7 +266,8 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         rb.pack(fill="x", pady=(0, 4))
         g = rb.group("ファイル")
         g.small("開く", self.on_open, "folder_open")
-        # ［保存］は、保存していない変更があるときだけ青い枠にする（2026-10-23 班長決定。_update_title で切り替える）
+        # ［保存］は、いつも同じ見た目にする（保存していない変更があるときの青い枠は、2026-10-26 に外した。班長決定。
+        # 保存していない変更は題の「＊」で示し、閉じる・開く・印刷・コピーの前に保存する〔尋ねる〕）
         self.save_button = g.small("保存", self.on_save, "save")
         # ［閉じる］は今の文書を閉じて新しい文書にする（VA DocuMake は終わらない）。［オプション］は構文ファイルの
         # 保存場所とエディターの見た目（2026-10-24 班長指示）
@@ -288,12 +289,19 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
                                                 values=[d.label for d in DOC_TYPES.values()])),
             ("ページ番号", lambda m: ttk.Combobox(m, state="readonly", width=16,
                                                 values=list(PAGE_NUMBER_LABELS.values())))])
-        # 行番号は、ページ番号の選択欄の下に右をそろえて置くチェックで付ける（VA公用文のセットアップと同じく、
-        # ページ番号と並べる。内容証明では付けない。2026-10-24 班長指示）
+        # 行番号は、ページ番号の選択欄の下に置くチェックで付ける（VA公用文のセットアップと同じく、ページ番号と並べる。
+        # 内容証明では付けない。2026-10-24 班長指示）。［番号1字］を足したので、右ではなく選択欄の左端にそろえる
+        # （2026-10-26 班長了承）
         self.line_numbers_var = tk.BooleanVar(value=False)
         self.line_numbers_check = tk.Checkbutton(frame, text="行番号", variable=self.line_numbers_var,
                                                  command=self.on_settings_changed)
-        self.line_numbers_check.grid(row=2, column=1, sticky="e", pady=1)
+        self.line_numbers_check.grid(row=2, column=1, sticky="w", pady=1)
+        # 見出し番号を全角1字の幅に縮めるチェック（VA疑似アウトラインの「数字を全角1文字扱いにする」。複合見出しの
+        # 上下の字をそろえるため。2026-10-26 班長指示）。行番号と同じ行の、選択欄の名前の列に置く（選択欄の下に並べると詰まる）。契約書1・技術文書では使えない
+        self.one_width_var = tk.BooleanVar(value=False)
+        self.one_width_check = tk.Checkbutton(frame, text="番号1字", variable=self.one_width_var,
+                                              command=self.on_settings_changed)
+        self.one_width_check.grid(row=2, column=0, sticky="w", pady=1)
         g.block(frame)
         self.doc_type_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
         self.page_number_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
@@ -451,11 +459,13 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         pages = {v: k for k, v in PAGE_NUMBER_LABELS.items()}
         doc_type = labels[self.doc_type_box.get()]
         line_numbers = self.line_numbers_var.get() and doc_type != naiyou.DOC_TYPE     # 内容証明には付けない
-        self.session.settings = vadm.Settings(doc_type, pages[self.page_number_box.get()], line_numbers)
+        one_width = self.one_width_var.get() and can_one_width(DOC_TYPES[doc_type])
+        self.session.settings = vadm.Settings(doc_type, pages[self.page_number_box.get()], line_numbers, one_width)
         self._sync_settings_boxes()
         # 次に起動したときの新しい文書も、この設定で始める（2026-10-23 班長指示）
         s = self.session.settings
         self.cfg.doc_type, self.cfg.page_number, self.cfg.line_numbers = s.doc_type, s.page_number, s.line_numbers
+        self.cfg.one_width = s.one_width
         config.save(self.cfg)
         self._update_title()
         self.refresh()
@@ -466,6 +476,9 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.line_numbers_var.set(self.session.settings.line_numbers)
         self.line_numbers_check.configure(
             state="disabled" if self.session.settings.doc_type == naiyou.DOC_TYPE else "normal")
+        self.one_width_var.set(self.session.settings.one_width)
+        self.one_width_check.configure(
+            state="normal" if can_one_width(DOC_TYPES[self.session.settings.doc_type]) else "disabled")
 
     # ---------- ウィンドウの大きさ・位置（前回終了したときに戻す。2026-10-23 班長指示） ----------
 
@@ -517,6 +530,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # 文書の種類・ページ番号も覚える（次に起動したときの新しい文書は、この設定で始める。2026-10-23 班長指示）
         s = self.session.settings
         cfg.doc_type, cfg.page_number, cfg.line_numbers = s.doc_type, s.page_number, s.line_numbers
+        cfg.one_width = s.one_width
 
     def on_options(self):
         """オプション（構文ファイルの保存場所、エディターの書体・字の大きさ・行の間隔。2026-10-24 班長指示）。"""
@@ -571,7 +585,6 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         except Exception:
             modified = True
         self.title(f"{'＊' if modified else ''}{name} - {APP_NAME} {VERSION_LABEL}")
-        set_accent(self.save_button, modified)
         # 確認表示の上に PDF、エディターの上に構文ファイルの名前と版を出す（2026-10-24 班長指示）。文書ID は
         # 構文ファイルの名前（<文書ID>.vadm）。保存するまではどちらもないので、そう書く
         s = self.session

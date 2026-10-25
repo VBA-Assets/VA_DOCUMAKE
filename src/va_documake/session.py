@@ -15,7 +15,7 @@ import fitz  # PyMuPDF
 
 from . import vadm
 from .cleanup import clean_lines
-from .doctypes import DOC_TYPES
+from .doctypes import DOC_TYPES, can_one_width, doc_type_for
 from .document import parse
 from .layout import Typesetter
 from .naiyou import DOC_TYPE as NAIYOU
@@ -48,7 +48,8 @@ class Session:
         self.doc_id = vadm.new_doc_id()
         self.version = 0
         self.settings = vadm.Settings(self.cfg.doc_type, self.cfg.page_number,
-                                      self.cfg.line_numbers and self.cfg.doc_type != NAIYOU)
+                                      self.cfg.line_numbers and self.cfg.doc_type != NAIYOU,
+                                      self.cfg.one_width and can_one_width(DOC_TYPES[self.cfg.doc_type]))
         self.dictionary = Dictionary()
         self.prompt = self.cfg.ai_prompt or None    # 利用者が直した AI への指示（None なら既定の指示。オプションで直す）
         self.pdf_path = None
@@ -73,7 +74,7 @@ class Session:
 
     @property
     def doc_type(self):
-        return DOC_TYPES[self.settings.doc_type]
+        return doc_type_for(self.settings.doc_type, self.settings.one_width)
 
     def is_modified(self, text):
         """保存した後に、文章・設定・構文ファイルの中身を変えたか（文末の改行・行末の空白の違いは、
@@ -160,7 +161,7 @@ class Session:
         self.saved_settings = replace(self.settings)
         self.cfg.remember_pdf_folder(pdf_path.parent)
         self.cfg.doc_type, self.cfg.page_number = self.settings.doc_type, self.settings.page_number
-        self.cfg.line_numbers = self.settings.line_numbers
+        self.cfg.line_numbers, self.cfg.one_width = self.settings.line_numbers, self.settings.one_width
 
     # ---------- 仮名化の解除・元の語の変更 ----------
 
