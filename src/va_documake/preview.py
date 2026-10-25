@@ -38,6 +38,18 @@ class PreviewMixin:
             self._preview_doc.close()
         self._preview_doc = fitz.open(stream=data, filetype="pdf")
         self._layout_pages()
+        self._show_layout_warning()
+
+    def _show_layout_warning(self):
+        """組んだときの知らせ（ヘッダー・フッターが余白に入りきらないなど）を状態の欄に出す。知らせることが
+        なくなったら、出していた知らせだけを消す（ほかの知らせは消さない）。"""
+        m = self.session.layout_map
+        warning = " ".join(m.ts.warnings) if m is not None else ""
+        if warning:
+            self.status.configure(text=warning)
+        elif self._layout_warning and str(self.status.cget("text")) == self._layout_warning:
+            self.status.configure(text="")
+        self._layout_warning = warning
 
     def _current_zoom(self):
         if self._zoom is not None:

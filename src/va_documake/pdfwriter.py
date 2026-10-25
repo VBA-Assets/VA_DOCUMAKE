@@ -22,7 +22,8 @@ from reportlab.pdfgen import canvas
 
 from .doctypes import (FW_DIGITS, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED,
                        PAGE_NUMBER_BOTTOM_RIGHT, PAGE_NUMBER_NONE, PAGE_NUMBER_TOP_RIGHT)
-from .layout import DOT_RADIUS, DOT_RISE, DOUBLE_RULE_GAP, FONT_SIZE, MM, PAGE_H, PAGE_W, RULE_WIDTH
+from .layout import (DOT_RADIUS, DOT_RISE, DOUBLE_RULE_GAP, FONT_SIZE, FOOTER_BASELINE_OFFSET, FOOTER_DISTANCE,
+                     HEADER_DISTANCE, PAGE_H, PAGE_W, RULE_WIDTH)
 
 def _font_dir():
     """同梱の書体（assets/fonts）の場所。exe（PyInstaller）では展開先（Windows の exe には入れない）。"""
@@ -57,8 +58,6 @@ LINE_NUMBER_STEP = 5
 LINE_NUMBER_PITCH = 4.2
 LINE_NUMBER_LAST_X = 22.14
 ID_PREFIX = "VADM"
-HEADER_DISTANCE, FOOTER_DISTANCE = 20 * MM, 15 * MM  # VA公用文 basSetup.ConfigPage
-FOOTER_BASELINE_OFFSET = 3.32   # フッターの位置から基準線までの高さ（VA公用文の PDF〔下中央〕で測った値）
 
 
 class FontNotEmbeddable(Exception):
@@ -148,8 +147,9 @@ def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTT
     for pg in range(1, pages + 1):
         c.setFont(c.vadm_fonts[0], FONT_SIZE)
         # 本文の行と表を、上から（文書の順に）描く。PDF の字の並びが文書の順になり、
-        # 構文ファイルとの突き合わせ（recover.py）で、表の前後の本文を取り違えない
-        items = [(ts.baseline(ln.row), 0, ln) for ln in lines if ln.page == pg]
+        # 構文ファイルとの突き合わせ（recover.py）で、表の前後の本文を取り違えない。ヘッダー・フッターの行も
+        # 上から描き、ページ番号はページの最後に描く（突き合わせで、余白の字からページ番号を除くため）
+        items = [(ts.line_baseline(ln), 0, ln) for ln in lines if ln.page == pg]
         items += [(piece.rows[0].top if piece.rows else 0, 1, piece)
                   for piece in getattr(ts, "tables", []) if piece.page == pg]
         for _, is_table, item in sorted(items, key=lambda t: (t[0], t[1])):
@@ -157,7 +157,7 @@ def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTT
                 draw_table(c, ts, item, highlight)
                 c.setFont(c.vadm_fonts[0], FONT_SIZE)
                 continue
-            y = PAGE_H - ts.baseline(item.row)
+            y = PAGE_H - ts.line_baseline(item)
             if highlight:
                 _draw_highlight(c, [(ts.margin_left + g.x, y, ts.advance(g.ch), g.pseudonym) for g in item.glyphs],
                                 PSEUDONYM_COLOR)
@@ -169,13 +169,14 @@ def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTT
             _draw_line_numbers(c, ts, lines, pg)
         if page_number != PAGE_NUMBER_NONE:
             s = page_number_text(page_number, pg, pages)
+            # 基準線は下中央・下右が「フッターの位置＋FOOTER_BASELINE_OFFSET」、右上が「ヘッダーの位置＋字の上端から
+            # 基準線まで」（右上の位置は VA公用文の PDF と比べていない。仕様.md の6.4。要確認）。ヘッダー・フッターが
+            # 余白に入りきらないときは、ずらした位置（layout.Typesetter.area_baselines）
+            y = PAGE_H - ts.page_number_baseline(pg, page_number)
             if page_number in (PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED):
-                c.drawCentredString(text_center, FOOTER_DISTANCE + FOOTER_BASELINE_OFFSET, s)
-            elif page_number == PAGE_NUMBER_BOTTOM_RIGHT:
-                c.drawRightString(ts.margin_left + ts.text_w, FOOTER_DISTANCE + FOOTER_BASELINE_OFFSET, s)
-            elif page_number == PAGE_NUMBER_TOP_RIGHT:
-                # 右上の位置は VA公用文の PDF と比べていない（仕様.md の6.4。要確認）
-                c.drawRightString(ts.margin_left + ts.text_w, PAGE_H - HEADER_DISTANCE - FONT_SIZE * 220 / 256, s)
+                c.drawCentredString(text_center, y, s)
+            elif page_number in (PAGE_NUMBER_BOTTOM_RIGHT, PAGE_NUMBER_TOP_RIGHT):
+                c.drawRightString(ts.margin_left + ts.text_w, y, s)
         c.showPage()
     c.save()
     with fitz.open(stream=buf.getvalue(), filetype="pdf") as doc:
@@ -204,7 +205,7 @@ def _draw_line_numbers(c, ts, lines, page):
     数えるのは本文の行と空の段落の行（Word の空の段落も1行に数える）で、表の中の行は数えない。番号は右をそろえ
     （最後の数字を本文の左端から LINE_NUMBER_LAST_X の所に置き、前の数字を LINE_NUMBER_PITCH ずつ左に置く）、
     行の字と基準線をそろえる。"""
-    rows = sorted({ln.row for ln in lines if ln.page == page}
+    rows = sorted({ln.row for ln in lines if ln.page == page and not ln.area}      # ヘッダー・フッターは数えない
                   | {r % ts.lines_page for r in ts.blank_rows if r // ts.lines_page + 1 == page})
     c.setFont(c.vadm_fonts[0], LINE_NUMBER_SIZE)
     for k, row in enumerate(rows, start=1):

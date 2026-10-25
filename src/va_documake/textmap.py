@@ -27,7 +27,10 @@ class LayoutMap:
                 self.para_of_line[n] = pi
         self.lines_of_para = defaultdict(list)
         for ln in lines:
-            self.lines_of_para[ln.para_index].append(ln)
+            same = self.lines_of_para[ln.para_index]
+            # ヘッダー・フッターの段落は各ページに出るので、エディターから示すのはセクションの最初のページの行
+            if not (ln.area and same and same[0].page != ln.page):
+                same.append(ln)
         self.pieces_of_para = defaultdict(list)
         for piece in getattr(ts, "tables", []):
             self.pieces_of_para[piece.para_index].append(piece)
@@ -79,10 +82,13 @@ class LayoutMap:
         for ln in lines:
             if ln.glyphs and ln.glyphs[0].index <= idx:
                 target = ln
+        if not target.glyphs:           # 字のないヘッダー・フッターの行
+            top, height = ts.line_box(target)
+            return target.page - 1, ts.margin_left, top, height
         g = min(target.glyphs, key=lambda g: abs(g.index - idx))
         x = g.x + (ts.advance(g.ch) if idx > g.index else 0)
-        page, top = self._row_top((target.page - 1) * ts.lines_page + target.row)
-        return page, ts.margin_left + x, top, ts.line_pitch
+        top, height = ts.line_box(target)
+        return target.page - 1, ts.margin_left + x, top, height
 
     def _locate_table(self, p, pi, line, col):
         r = line - p.src_line
@@ -114,8 +120,8 @@ class LayoutMap:
             return None
 
         def dist(ln):
-            top = ts.margin_top + ln.row * ts.line_pitch
-            return 0 if top <= y < top + ts.line_pitch else min(abs(y - top), abs(y - top - ts.line_pitch))
+            top, height = ts.line_box(ln)
+            return 0 if top <= y < top + height else min(abs(y - top), abs(y - top - height))
         ln = min(on_page, key=dist)
         rel = x - ts.margin_left
         g = min(ln.glyphs, key=lambda g: abs(g.x + ts.advance(g.ch) / 2 - rel))

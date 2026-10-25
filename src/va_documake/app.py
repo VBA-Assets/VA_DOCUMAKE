@@ -17,8 +17,8 @@ from tkinter import ttk
 from . import APP_NAME, __version__, config, ime, naiyou, printing, theme, tooltip, vadm
 from .ai_ops import AiMixin
 from .doctypes import DOC_TYPES, PAGE_NUMBER_LABELS
-from .document import (CENTER_MARK, INDENT_MARK, PAGE_BREAK_MARK, RIGHT_MARK, SECTION_BREAK_MARK, TITLE_MARK,
-                       TOC_MARK)
+from .document import (CENTER_MARK, HEADER_MARK, INDENT_MARK, PAGE_BREAK_MARK, RIGHT_MARK, SECTION_BREAK_MARK,
+                       TITLE_MARK, TOC_MARK)
 from .dialogs import OptionsDialog
 from .editor_ops import EditorMixin
 from .file_ops import FileMixin
@@ -94,6 +94,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.session = Session(self.cfg)
         self._refresh_job = None
         self._preview_doc = None
+        self._layout_warning = ""       # 状態の欄に出している、組んだときの知らせ（ヘッダーが本文に重なるなど）
         self._preview_page = 0
         self._page_tops = []
         self._zoom = None               # None は幅に合わせる
@@ -304,11 +305,14 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         g.block(frame)
         self.doc_type_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
         self.page_number_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
-        for label, mark, icon in (("表題", TITLE_MARK, "document_header"), ("中央", CENTER_MARK, "text_align_center"),
+        for label, mark, icon in (("表題", TITLE_MARK, "document_title"), ("中央", CENTER_MARK, "text_align_center"),
                                   ("右", RIGHT_MARK, "text_align_right"), ("字下げ", INDENT_MARK, "text_first_line")):
             g.small(label, lambda m=mark: self.on_align(m), icon)
         # ［インデント］は［字下げ］の下に置く（2026-10-24 班長指示）
         g.small("インデント", self.on_indent, "text_indent_increase")
+        # ［ヘッダー］は、選んだ行の行頭に [HEADER] を付け外しする。配置のボタンと同じく行頭の記号を付け外しするので、
+        # ［インデント］の下に置く。フッターはほぼ使わないのでボタンを置かず、[FOOTER] は手で書く（2026-10-25 班長指示）
+        g.small("ヘッダー", lambda: self.on_area(HEADER_MARK), "document_header")
         # 1行あけるのは、エディターの空の行で行う（Word と同じ。［空行］は置かない。2026-10-23 班長決定）
         g = rb.group("挿入")
         for label, mark, icon in (("改ページ", PAGE_BREAK_MARK, "document_page_break"),
@@ -530,7 +534,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.cfg.editor_line_spacing = r["line_spacing"]
         if r["prompt"] is not None:
             # AI への指示：今の文書と、これから作る文書に使う。保存してある構文ファイルの指示も書き直す
-            custom = None if r["prompt"].rstrip() == vadm.PROMPT.rstrip() else r["prompt"]
+            custom = None if vadm.is_default_prompt(r["prompt"]) else r["prompt"]
             self.session.prompt = custom
             self.cfg.ai_prompt = custom or ""
             self.session.rewrite_prompt()

@@ -582,7 +582,7 @@ def test_buttons_have_icons(window):
             yield from buttons(c)
     found = {str(b.cget("text")).replace("\n", ""): b for b in buttons(window)}
     for text in ("開く", "保存", "印刷", "閉じる", "コピーとして開く", "名前を付けて保存", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "字下げ", "インデント", "太字", "均等割付",
-                 "改ページ", "セクション区切り", "検索", "置換", "蛍光ペン", "幅に合わせる"):
+                 "改ページ", "セクション区切り", "ヘッダー", "検索", "置換", "蛍光ペン", "幅に合わせる"):
         assert found[text].cget("image"), text
         # リボンの大きいボタン（AI 連携）はアイコンの下に字、ほかはアイコンの右に字
         large = text in ("選択範囲を仮名化", "コピー", "貼り付け") and not window.ribbon.groups[1].compact
@@ -616,6 +616,25 @@ def test_buttons_have_tooltips(window):
     # アイコンだけのボタン（＜ ＞ － ＋）にも、説明が付いている
     for key in ("＜", "＞", "－", "＋"):
         assert tooltip.TIPS[key] in tips
+    # メインの画面のボタン・チェックは、すべて説明を持つ（ボタンを足したときの付け忘れを見つける。2026-10-25、
+    # ［ヘッダー］に説明がなかった）。アイコンだけのボタンは、字の代わりにアイコンの名前で見る
+    from va_documake import icons
+    names = {v: k for k, v in icons.ICON_ONLY.items()}
+
+    def labels(w):
+        for c in w.winfo_children():
+            if isinstance(c, tk.Toplevel):
+                continue
+            if isinstance(c, (tk.ttk.Button, tk.ttk.Radiobutton, tk.Checkbutton)):
+                text = str(c.cget("text")).replace("\n", "")
+                if not text:
+                    image = str(c.cget("image")).split()
+                    text = next((k for n, k in names.items() for i in image if n in i), "")
+                yield text, c
+            yield from labels(c)
+    missing = [text for text, c in labels(window) if text and text not in tooltip.TIPS]
+    assert not missing, missing
+    assert tooltip.TIPS["ヘッダー"] in tips
     window.deiconify()
     window.update()
     tip = tips[tooltip.TIPS["保存"]]
@@ -838,6 +857,62 @@ def test_indent_button_and_shortcuts(window):
     assert all("mark" in window.text.tag_names(f"3.{c}") for c in range(3))
     window.on_plain()                                    # 標準（Ctrl+Shift+N）で記号を外す
     assert window.text.get("3.0", "3.end") == "次の段落。"
+
+def test_header_footer_buttons(window):
+    """［ヘッダー］：選んだ行の行頭に [HEADER] を付け、もう一度で外す（on_area は [FOOTER] にも使え、もう片方とは
+    付け替える。フッターのボタンは置かない）。配置の記号は残す。見出しの行には付けない。記号は青い字で示し、確認表示では
+    ヘッダーに組む（2026-10-25 班長指示）。"""
+    assert not [b for b in _all_buttons(window) if str(b.cget("text")) == "フッター"]
+    # ［ヘッダー］は「書式」の組の［インデント］の下（2026-10-25 班長指示）
+    found = {str(b.cget("text")): b for b in _all_buttons(window)}
+    head, indent = found["ヘッダー"], found["インデント"]
+    assert head.master is indent.master is window.ribbon.groups[2].body
+    assert head.grid_info()["column"] == indent.grid_info()["column"]
+    assert int(head.grid_info()["row"]) == int(indent.grid_info()["row"]) + 1
+    window._load_text("--: 事件番号\n担当\n# 認否\n主張は争う。")
+    window.text.tag_add("sel", "1.0", "2.end")
+    window.on_area("[HEADER] ")
+    assert _lines(window, 1, 2) == ["[HEADER] --: 事件番号", "[HEADER] 担当"]
+    window.on_align(":-: ")                                 # 配置は付け替え、ヘッダーの記号は残す
+    assert _lines(window, 1, 2) == ["[HEADER] :-: 事件番号", "[HEADER] :-: 担当"]
+    window.text.tag_remove("sel", "1.0", "end")
+    window.text.mark_set("insert", "2.0")
+    window.on_area("[FOOTER] ")                             # もう片方とは付け替える
+    assert _lines(window, 2, 2) == ["[FOOTER] :-: 担当"]
+    window.on_area("[FOOTER] ")                             # もう一度で外す
+    assert _lines(window, 2, 2) == [":-: 担当"]
+    window.text.mark_set("insert", "3.0")
+    window.on_area("[HEADER] ")                             # 見出しの行には付けない
+    assert _lines(window, 3, 3) == ["# 認否"]
+    window.text.edit_undo()                                 # Ctrl+Z 1回で1回分戻る
+    assert _lines(window, 2, 2) == ["[FOOTER] :-: 担当"]
+    window._highlight()
+    ranges = window.text.tag_ranges("mark")
+    assert "[HEADER] :-: " in [window.text.get(a, b) for a, b in zip(ranges[0::2], ranges[1::2])]
+    window.on_plain()                                       # 標準は配置を外し、置く場所の記号は残す
+    assert _lines(window, 2, 2) == ["[FOOTER] 担当"]
+    window.refresh()
+    lines = window.session.layout_map.lines
+    assert sorted((ln.area, "".join(g.ch for g in ln.glyphs)) for ln in lines if ln.area) == [
+        ("footer", "担当"), ("header", "事件番号")]
+
+
+def _all_buttons(w):
+    from tkinter import ttk
+    for c in w.winfo_children():
+        if isinstance(c, ttk.Button):
+            yield c
+        yield from _all_buttons(c)
+
+
+def test_header_overflow_is_shown_in_status(window):
+    window._load_text("\n".join(["[HEADER] 行"] * 6 + ["本文"]))
+    window.refresh()
+    assert "ヘッダー" in str(window.status.cget("text"))
+    window._load_text("本文")
+    window.refresh()
+    assert str(window.status.cget("text")) == ""
+
 
 def test_distribute_button(window):
     """［均等割付］で選んだ字を [字]{N} の形で挟み（N は選んだ字の数。手で直す）、もう一度で外す。"""

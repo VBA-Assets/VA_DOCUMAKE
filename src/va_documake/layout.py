@@ -5,15 +5,29 @@
 """
 import math
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from .document import BLANK, BULLET, CENTER, HEADING, NUMBER, PAGE_BREAK, RIGHT, SECTION_BREAK, TABLE, TITLE, TOC
-from .document import TOC_LEVELS, heading_label
-from .doctypes import TITLE_CENTER, TITLE_JUSTIFY, TITLE_LEFT
+from .document import BLANK, BULLET, CENTER, FOOTER, HEADER, HEADING, NUMBER, PAGE_BREAK, RIGHT, SECTION_BREAK, TABLE
+from .document import TITLE, TOC, TOC_LEVELS, heading_label
+from .doctypes import (PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED, PAGE_NUMBER_BOTTOM_RIGHT,
+                       PAGE_NUMBER_TOP_RIGHT, TITLE_CENTER, TITLE_JUSTIFY, TITLE_LEFT)
 
 MM = 72 / 25.4
 PAGE_W, PAGE_H = 210 * MM, 297 * MM
 FONT_SIZE = 12
+
+# ページ番号・ヘッダー・フッターの位置
+HEADER_DISTANCE, FOOTER_DISTANCE = 20 * MM, 15 * MM  # VA公用文 basSetup.ConfigPage
+FOOTER_BASELINE_OFFSET = 3.32   # フッターの位置から基準線までの高さ（VA公用文の PDF〔下中央〕で測った値）
+# ヘッダー・フッターの行送り：Word の1行（ＭＳ 明朝 12pt）の高さ。行の高さの真ん中に字を置くとして、フッターの基準線の
+# 高さ（FOOTER_BASELINE_OFFSET）から求めた値（約 15.27pt）。行の下端は基準線の FOOTER_BASELINE_OFFSET 下
+HF_LINE_PITCH = FONT_SIZE + 2 * (FOOTER_BASELINE_OFFSET - FONT_SIZE * 36 / 256)
+HF_BELOW = FOOTER_BASELINE_OFFSET
+HF_ABOVE = HF_LINE_PITCH - HF_BELOW
+# 余白に入りきらないヘッダー・フッターを、用紙の端の側へずらすときの限り（用紙の端からの距離。2026-10-25 班長決定）
+HF_EDGE_MIN = 5 * MM
+_FOOTER_PAGE_NUMBERS = (PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED, PAGE_NUMBER_BOTTOM_RIGHT)
+_NAIYOU = "Naiyou"              # 内容証明（ヘッダー・フッターを付けない。naiyou.DOC_TYPE と同じ）
 
 # 表の値（仕様.md の5.3。Word に合わせ込まず、Word の既定に寄せた読みやすい値）
 CELL_PAD_X = 1.9 * MM           # セルの左右の余白（Word の既定 1.9mm）
@@ -71,9 +85,11 @@ class Glyph:
 @dataclass
 class Line:
     page: int               # 1 から
-    row: int                # ページの中の何行目か（0 から）
+    row: int                # ページの中の何行目か（0 から。ヘッダー・フッターの行は -1）
     glyphs: list = field(default_factory=list)
     para_index: int = -1    # 何番目の段落の行か
+    area: str = None        # ヘッダー・フッターの行なら HEADER・FOOTER
+    y: float = None         # ヘッダー・フッターの行の基準線（用紙の上端から。ポイント）
 
 
 @dataclass
@@ -109,8 +125,12 @@ class TablePiece:
 
 
 class Typesetter:
-    def __init__(self, dt):
+    def __init__(self, dt, page_number=PAGE_NUMBER_BOTTOM_CENTER):
+        """dt は文書の種類、page_number はページ番号の位置（ヘッダー・フッターをページ番号の直下・直上に置くため）。"""
         self.dt = dt
+        self.page_number = page_number
+        self.page_number_shift = {}     # ページ → ページ番号をずらす量（ヘッダー・フッターが余白に入りきらないとき）
+        self.warnings = []              # 利用者に知らせること（ヘッダーが本文に重なるなど）
         top, bottom, left, right = dt.margins
         chars, lines = dt.chars_lines
         self.margin_top, self.margin_left = top * MM, left * MM
@@ -327,10 +347,15 @@ class Typesetter:
         self.tables = []
         self.para_rows = {}     # 段落 → 始まる行（通しの行の番号。空の行・表も含む。確認表示とエディターの連動に使う）
         self.blank_rows = []    # 空の段落の行（通しの行の番号。行番号を数えるのに使う）
+        # セクションごとの、始まるページとヘッダー・フッターの段落
+        sections = [{"start": 1, HEADER: [], FOOTER: []}]
         out = []
         row = 0
         for pi, p in enumerate(paras):
             self.para_rows[pi] = row
+            if p.area:
+                sections[-1][p.area].append(pi)     # 本文の行は使わない（_layout_areas で組む）
+                continue
             if p.kind == TABLE:
                 row = self.layout_table(p, row, pi)
                 continue
@@ -345,6 +370,7 @@ class Typesetter:
                     row += self.lines_page - row % self.lines_page
                 if p.kind == SECTION_BREAK:
                     self.first_level = None
+                    sections.append({"start": row // self.lines_page + 1, HEADER: [], FOOTER: []})
                 continue
             if p.kind == BLANK or not (p.number or p.text):
                 # 空の行・中身のない配置の行（--: だけの行など）は、Word の空の段落と同じく1行使う
@@ -374,7 +400,97 @@ class Typesetter:
                 offset += sum(len(ch) for ch, _ in chars)
                 num_left -= num_here
                 row += 1
+        self._layout_areas(paras, out, sections)
         return out
+
+    # ---------- ヘッダー・フッター（[HEADER] [FOOTER]。2026-10-25 班長指示） ----------
+
+    def _layout_areas(self, paras, out, sections):
+        """ヘッダー・フッターの段落を組み、行（Line.area・Line.y）として out に足す。ヘッダーはセクションの最初のページ
+        （文書の最初のページ、セクション区切りの直後のページ）だけ、フッターはセクションの全ページに出す（「別紙」
+        「付紙」などをヘッダーに書く使い方のため。2026-10-25 班長指示）。本文の行は使わない。内容証明では組まない
+        （VA内容証明郵便がヘッダー・フッターを消すのと同じ）。"""
+        self.page_number_shift, self.warnings = {}, []
+        if not any(s[HEADER] or s[FOOTER] for s in sections):
+            return
+        if self.dt.key == _NAIYOU:
+            self.warnings.append("内容証明には、ヘッダー・フッターを付けません（[HEADER]・[FOOTER] の行は組みません）。")
+            return
+        pages = max([ln.page for ln in out] + [piece.page for piece in self.tables] + [1])
+        for si, s in enumerate(sections):
+            last = sections[si + 1]["start"] - 1 if si + 1 < len(sections) else pages
+            for area in (HEADER, FOOTER):
+                laid = [(pi, glyphs) for pi in s[area] for glyphs in self._area_lines(paras[pi])]
+                end = s["start"] if area == HEADER else last
+                if not laid or last < s["start"]:
+                    continue
+                pn_y, ys, over = self.area_baselines(area, len(laid))
+                if over:
+                    where = f"{s['start']} ページ" if end == s["start"] else f"{s['start']}〜{end} ページ"
+                    name = "ヘッダーが上" if area == HEADER else "フッターが下"
+                    self.warnings.append(f"{name}の余白に入りきらず、本文に重なっています（{where}）。行を減らしてください。")
+                for page in range(s["start"], end + 1):
+                    if pn_y is not None:
+                        self.page_number_shift[page] = pn_y - self._page_number_y(area)
+                    for (pi, glyphs), y in zip(laid, ys):
+                        out.append(Line(page, -1, [replace(g) for g in glyphs], pi, area, y))
+
+    def _area_lines(self, p):
+        """ヘッダー・フッターの段落を、本文の幅で組んだ行（[Glyph] のリスト）。字のない段落も1行使う。"""
+        if not p.text:
+            return [[]]
+        left, first, right = self.indents(p)
+        items = self.make_items(p.text, p.distribute, self.text_w - right - left - max(first, 0.0))
+        out, offset = [], 0
+        for start_x, chars, hang, last, trail in self.break_lines(items, left, first, right):
+            placed = self.place_line(p.align, start_x, chars, hang, last, trail, 0, right)
+            out.append([Glyph(ch, x, False, offset + k) for k, (ch, x) in enumerate(placed)])
+            offset += sum(len(ch) for ch, _ in chars)
+        return out
+
+    def _page_number_y(self, area):
+        """ヘッダー（フッター）の側のページ番号の基準線（用紙の上端から。ずらす前）。右上は要確認（仕様.md の6.4）。"""
+        if area == HEADER:
+            return HEADER_DISTANCE + FONT_SIZE * 220 / 256
+        return PAGE_H - FOOTER_DISTANCE - FOOTER_BASELINE_OFFSET
+
+    def page_number_baseline(self, page, style):
+        """ページ番号の基準線（用紙の上端から）。ヘッダー・フッターが余白に入りきらず、ずらしたときは、ずらした位置。"""
+        return self._page_number_y(HEADER if style == PAGE_NUMBER_TOP_RIGHT else FOOTER) + self.page_number_shift.get(page, 0.0)
+
+    def area_baselines(self, area, n):
+        """ヘッダー（area が HEADER）・フッターの n 行の位置。(同じ側のページ番号の基準線〔なければ None〕,
+        [各行の基準線], 本文に重なるか) を返す（基準線は用紙の上端から）。
+
+        ヘッダーはページ番号の直下から、フッターはページ番号の直上まで、HF_LINE_PITCH おきに積む。同じ側にページ番号が
+        なければ、ページ番号の位置から書き出す（ヘッダー）・ページ番号の位置で終える（フッター）。行が本文の範囲（上下の
+        余白の内側）にかかるときは、本文を動かさず、ページ番号ごと用紙の端の側へずらす（端から HF_EDGE_MIN まで）。
+        それでも入らなければ、本文に重なるとして知らせる（2026-10-25 班長決定）。
+        """
+        b0 = self._page_number_y(area)
+        if area == HEADER:
+            has_pn = self.page_number == PAGE_NUMBER_TOP_RIGHT
+            ys = [b0 + (k + has_pn) * HF_LINE_PITCH for k in range(n)]
+            over = ys[-1] + HF_BELOW - self.margin_top
+            room = b0 - HF_ABOVE - HF_EDGE_MIN
+            shift = -min(max(over, 0.0), room)
+        else:
+            has_pn = self.page_number in _FOOTER_PAGE_NUMBERS
+            ys = [b0 - (n - k - (0 if has_pn else 1)) * HF_LINE_PITCH for k in range(n)]
+            over = self.margin_top + self.lines_page * self.line_pitch - (ys[0] - HF_ABOVE)
+            room = PAGE_H - HF_EDGE_MIN - (b0 + HF_BELOW)
+            shift = min(max(over, 0.0), room)
+        return (b0 + shift if has_pn else None), [y + shift for y in ys], over > room + 0.01
+
+    def line_baseline(self, ln):
+        """行の字の基準線（用紙の上端から）。ヘッダー・フッターの行も。"""
+        return ln.y if ln.area else self.baseline(ln.row)
+
+    def line_box(self, ln):
+        """行の (上端, 高さ)（用紙の上端から。確認表示とエディターの連動に使う）。"""
+        if ln.area:
+            return ln.y - HF_ABOVE, HF_LINE_PITCH
+        return self.margin_top + ln.row * self.line_pitch, self.line_pitch
 
     # ---------- 目次（[TOC]。2026-10-24 班長指示） ----------
 

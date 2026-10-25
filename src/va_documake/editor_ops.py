@@ -9,9 +9,9 @@ import tkinter as tk
 from . import vadm
 from .document import (BULLET, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN, DISTRIBUTE_RE, HEADING,
                        HEADING_MARK_RE, INDENT_MARK, LEAD_ALIGN_MARKS, LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, RIGHT_MARK,
-                       TABLE, cell_separators, has_inline_marks, inline_mark_spans, is_line_mark, lead_mark_len,
-                       leading_wrap, move_wraps_after_marks, parse, parse_separator, remove_bold, split_inline,
-                       split_lead_marks)
+                       TABLE, area_of, cell_separators, has_inline_marks, inline_mark_spans, is_line_mark,
+                       lead_mark_len, leading_wrap, move_wraps_after_marks, parse, parse_separator, remove_bold,
+                       split_inline, split_lead_marks)
 from .find_dialog import FindDialog
 from .layout import is_half
 from .pseudonym import TOKEN_RE, normalize_token
@@ -323,19 +323,20 @@ class EditorMixin:
             return
 
         def has(norm):
-            align, _, first, _ = split_lead_marks(norm)
-            return first if mark == INDENT_MARK else align == mark
+            lead = split_lead_marks(norm)
+            return lead.first if mark == INDENT_MARK else lead.align == mark
         release = all(has(norm) for _, _, norm in rows)
         with undoable(self.text):          # 何行あっても、Ctrl+Z 1回で戻せる
             self._align_cells(cells, mark)
             self._align_columns(columns, mark)
             for n, line, norm in rows:
                 # 「**:=: 準備書面**」は「:=: **準備書面**」として扱う。配置の記号と -> は付け替え、
-                # +N は残す（記号の順は、配置・インデント・字下げ）
-                _, left, _, rest = split_lead_marks(norm)
+                # +N・[HEADER] は残す（記号の順は、ヘッダー・配置・インデント・字下げ）
+                lead = split_lead_marks(norm)
+                rest = lead.rest
                 align = "" if release or mark == INDENT_MARK else mark
                 first = not release and mark == INDENT_MARK
-                prefix = align + left + (INDENT_MARK if first else "")
+                prefix = lead.area + align + lead.left + (INDENT_MARK if first else "")
                 if norm != line:
                     self.text.delete(f"{n}.0", f"{n}.end")
                     self.text.insert(f"{n}.0", prefix + rest)
@@ -436,15 +437,41 @@ class EditorMixin:
         lines = [p for p in lines if p is not None]
         if not lines:
             return
-        release = all(left for _, left, _, _ in lines)
+        release = all(p.left for p in lines)
 
         def change(line, n):
             parts = target(line)
             if parts is None:
                 return None
-            align, left, first, rest = parts
-            mark = "" if release else (left or LEFT_INDENT_MARK)
-            return align + mark + (INDENT_MARK if first else "") + rest
+            mark = "" if release else (parts.left or LEFT_INDENT_MARK)
+            return parts.area + parts.align + mark + (INDENT_MARK if parts.first else "") + parts.rest
+        self._edit_lines(change)
+
+    def on_area(self, mark):
+        """選んだ行（なければカーソルの行）を、ヘッダー・フッターの行にする（行頭に [HEADER] [FOOTER] を付ける。
+        2026-10-25 班長指示）。もう片方の記号は付け替える。対象の行がすべて既にその記号なら外す（ほかのボタンと同じ）。
+        配置の記号・+N・-> は残す。表・改ページなどの記号の行・区切りの行と、見出し・箇条書き・段落番号の行には
+        付けない（付けると見出しなどでなくなるため。［インデント］と同じ）。Ctrl+Z 1回で戻せる。"""
+        def target(line):
+            if line.lstrip().startswith("|") or is_line_mark(line) or vadm.SEPARATOR_RE.match(line):
+                return None
+            parts = split_lead_marks(move_wraps_after_marks(line))
+            if not (parts.area or parts.left or parts.first) and (
+                    HEADING_MARK_RE.match(parts.rest) or LIST_MARK_RE.match(parts.rest)):
+                return None
+            return parts
+        first, last = self._line_range()
+        lines = [target(self.text.get(f"{n}.0", f"{n}.end")) for n in range(first, last + 1)]
+        lines = [p for p in lines if p is not None]
+        if not lines:
+            return
+        release = all(area_of(p.area) == area_of(mark) for p in lines)
+
+        def change(line, n):
+            parts = target(line)
+            if parts is None:
+                return None
+            return ("" if release else mark) + parts.align + parts.left + (INDENT_MARK if parts.first else "") + parts.rest
         self._edit_lines(change)
 
     def _edit_lines(self, change):
@@ -502,8 +529,12 @@ class EditorMixin:
         def change(line, n):
             if line.lstrip().startswith("|") or is_line_mark(line) or vadm.SEPARATOR_RE.match(line):
                 return None
-            # 「**:-: # 見出し**」は「:-: # **見出し**」として扱う。配置・+N・-> の記号を外す
-            line = split_lead_marks(move_wraps_after_marks(line))[3]
+            # 「**:-: # 見出し**」は「:-: # **見出し**」として扱う。配置・+N・-> の記号を外す（ヘッダー・フッターの
+            # 記号は、置く場所の記号なので残す。Word の「標準」でも、ヘッダーの段落はヘッダーのまま）
+            lead = split_lead_marks(move_wraps_after_marks(line))
+            if lead.area:
+                return lead.area + lead.rest
+            line = lead.rest
             m = HEADING_MARK_RE.match(line)
             if m:
                 line = line[m.end():]
@@ -586,8 +617,9 @@ def _mark_spans(text):
 def _special_line(line):
     """見出しのレベルを変えない行（表・改ページなどの記号の行・配置の記号の行・区切りの行・空の行）。"""
     s = line.strip()
+    lead = split_lead_marks(move_wraps_after_marks(line))
     return (not s or s.startswith("|") or is_line_mark(s) or vadm.SEPARATOR_RE.match(line)
-            or split_lead_marks(move_wraps_after_marks(line))[:3] != ("", "", False))
+            or bool(lead.align or lead.left or lead.first or lead.area))
 
 
 def _split_heading(line):

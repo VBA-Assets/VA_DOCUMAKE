@@ -23,6 +23,12 @@
   「行間詰め」と同じく、インデントの自動調節の対象外。2026-10-24 班長指示）。「+81 3-1234-5678」のような電話番号の
   字を消さないよう、空白の後が数字・括弧・ハイフン・空白だけのもの（字のない行も）は記号とみなさない。`-> ` と一緒に使うと（`+2 -> 本文`）、1行目を
   さらに1字下げる（このときの `-> ` は、その段落の1行目を下げるだけで、後の段落の変換は止めない）。
+・`[HEADER] ` `[FOOTER] `：行頭に書くと、その段落を本文から外し、ヘッダー（上の余白。ページ番号の直下）・フッター（下の
+  余白。ページ番号の直上）に組む（2026-10-25 班長指示。記号の形は班長決定。[TOC] と同じく角かっこの英語。小文字でもよい）。
+  配置の記号・+N・-> と一緒に使える（順は問わない。ボタンで付けるときは `[HEADER] --: 文字` の順）。ヘッダーは、その
+  行を書いたセクションの最初のページ（文書の最初のページ、セクション区切りの直後のページ）だけ、フッターはセクションの
+  全ページに出す（「別紙」「付紙」などをヘッダーに書く使い方のため。2026-10-25 班長指示）。本文の行を使わず、見出し・番号・インデントの変換をせず、「最初の見出しを
+  過ぎたか」「右揃えの段落を過ぎたか」も変えない。組み方は layout.py。
 ・`<<<`：その行だけを書いた行で、ページを改める（見出しの番号は続く。AsciiDoc の改ページの記号と同じ）。
 ・`[TOC]`：その行だけを書いた行に、見出しの3段目までの目次を組む（layout.py。2026-10-24 班長指示。Python-Markdown・
   Typora などの目次の記号と同じ。小文字でもよい）。`[TOC:2]` のように段（1〜9）を書き添えると、その段までを載せる
@@ -79,6 +85,10 @@ LEAD_ALIGN_MARKS = (*ALIGN_MARKS, INDENT_MARK)     # 画面で配置と同じく
 # ハイフン・空白だけのもの（字のない行も）は除く（「+2 1. 本文」は記号）
 LEFT_INDENT_RE = re.compile(r"[+＋]([0-9０-９]{1,2}) (?![0-9０-９()（）+＋.．\-－‐ 　]*$)")
 LEFT_INDENT_MARK = "+1 "    # ［インデント］で付ける記号
+# ヘッダー・フッター（Para.area）。行頭の [HEADER] [FOOTER]（小文字でもよい。後ろに半角空白。行末なら空白はなくてよい）
+HEADER, FOOTER = "header", "footer"
+HEADER_MARK, FOOTER_MARK = "[HEADER] ", "[FOOTER] "
+AREA_MARK_RE = re.compile(r"\[(header|footer)\](?: |$)", re.I)
 PAGE_BREAK_MARK, SECTION_BREAK_MARK = "<<<", "<<<="
 _LINE_MARKS = {PAGE_BREAK_MARK: PAGE_BREAK, SECTION_BREAK_MARK: SECTION_BREAK}
 TOC_LEVELS = 3              # 目次に載せる見出しの段の既定（Word の「自動作成の目次 1」と同じ）
@@ -192,24 +202,16 @@ def move_wraps_after_marks(line, lists=True):
     行頭の記号（配置の記号・-> ・見出し・箇条書き・段落番号）の前にあるときは、記号の後に移す（「:=: **準備書面**」
     「# **見出し**」）。AI は行を丸ごと太字にすることがあり、VA公用文は ** を取り除いて記号として読むので、同じく記号と
     する（2026-10-24 班長指示）。字の数は変わらない。lists が偽なら（右揃えの段落の後など）、見出し・箇条書き・
-    段落番号の記号は移さない。-> ・+N の後の見出しなどの記号も移さない（その段落は見出しにしないため）。
+    段落番号の記号は移さない。-> ・+N・[HEADER] の後の見出しなどの記号も移さない（その段落は見出しにしないため）。
     「**==…==**」のように重ねたものは、内側から移す。"""
     wrap = leading_wrap(line)
     if wrap is None:
         return line
-    rest, k = move_wraps_after_marks(line[len(wrap):], lists), 0
-    for mark in ALIGN_MARKS:
-        if lead_mark_len(rest, mark):
-            k = lead_mark_len(rest, mark)
-            break
-    while True:
-        m = LEFT_INDENT_RE.match(rest, k)
-        n = lead_mark_len(rest, INDENT_MARK, k)
-        if n or m:
-            k = m.end() if m else k + n
-            lists = False
-            continue
-        break
+    rest = move_wraps_after_marks(line[len(wrap):], lists)
+    lead = split_lead_marks(rest)
+    k = len(rest) - len(lead.rest)
+    if lead.left or lead.first or lead.area:
+        lists = False
     if lists:
         m = HEADING_MARK_RE.match(rest, k) or LIST_MARK_RE.match(rest, k)
         if m:
@@ -294,6 +296,7 @@ class Para:
     distribute: tuple = ()          # 均等割付 ((始め, 終わり, 字数), ...)（本文の何字目か。番号は含まない）
     src_cols: list = None           # 本文の各字が元の行の何字目か（＋末尾）。太字の記号を除いたので、src_col からの通しではない
     composite: bool = False         # 字のない見出しで、次の見出しと1行にまとめるもの（複合見出しの外側の段）
+    area: str = None                # ヘッダー・フッターの段落なら HEADER・FOOTER（本文の行を使わない）
 
     def text_index(self, col):
         """元の行の col 字目 → 本文の何字目か。"""
@@ -422,28 +425,39 @@ def left_indent_of(mark):
     return int(mark.strip()[1:])
 
 
+class LeadMarks(NamedTuple):
+    """行頭の記号を読んだ結果（split_lead_marks）。記号がなければ ""。"""
+    align: str      # 配置の記号
+    left: str       # +N の記号
+    first: bool     # -> があるか
+    rest: str       # 記号の後ろ
+    area: str = ""  # [HEADER] [FOOTER] の記号（書いたとおりの大文字・小文字）
+
+
+def area_of(mark):
+    """[HEADER] [FOOTER] の記号（split_lead_marks が返す形）から HEADER・FOOTER を返す（記号がなければ None）。"""
+    return (HEADER if mark.strip()[1:-1].lower() == HEADER else FOOTER) if mark else None
+
+
 def split_lead_marks(line):
-    """行頭の記号を読む。(配置の記号, +N の記号, -> があるか, 残り) を返す（記号がなければ ""）。
-    配置の記号が先、+N と -> は順不同（エディターの付け外しと、AI の回答の確かめに使う）。記号は、後ろの半角の
-    空白を付けた形で返す（行末で空白のないものも）。"""
-    align = next((m for m in ALIGN_MARKS if lead_mark_len(line, m)), "")
-    rest, left, first = line[lead_mark_len(line, align) if align else 0:], "", False
+    """行頭の記号を読み、LeadMarks を返す。配置の記号は +N・-> より先、+N と -> は順不同、[HEADER] [FOOTER] は
+    どの位置でもよい（エディターの付け外しと、AI の回答の確かめに使う）。記号は、後ろの半角の空白を付けた形で返す
+    （行末で空白のないものも）。"""
+    rest, align, left, first, area = line, "", "", False, ""
     while True:
-        m = LEFT_INDENT_RE.match(rest)
-        if m and not left:
-            left, rest = m.group(0).rstrip() + " ", rest[m.end():]
+        m_area = AREA_MARK_RE.match(rest)
+        m_left = LEFT_INDENT_RE.match(rest)
+        mark = "" if align or left or first else next((m for m in ALIGN_MARKS if lead_mark_len(rest, m)), "")
+        if m_area and not area:
+            area, rest = m_area.group(0).rstrip() + " ", rest[m_area.end():]
+        elif mark:
+            align, rest = mark, rest[lead_mark_len(rest, mark):]
+        elif m_left and not left:
+            left, rest = m_left.group(0).rstrip() + " ", rest[m_left.end():]
         elif lead_mark_len(rest, INDENT_MARK) and not first:
             first, rest = True, rest[lead_mark_len(rest, INDENT_MARK):]
         else:
-            return align, left, first, rest
-
-
-def split_align(line):
-    """行頭の配置の記号を取り除き、(配置, 残りの文字列) を返す。"""
-    for mark, align in ALIGN_MARKS.items():
-        if lead_mark_len(line, mark):
-            return align, line[lead_mark_len(line, mark):]
-    return JUSTIFY, line
+            return LeadMarks(align, left, first, rest, area)
 
 
 def split_leading_space(line):
@@ -493,19 +507,23 @@ def parse(lines, dt):
             continue
         line, indent = split_leading_space(line)
         line = move_wraps_after_marks(line, lists=not stopped)  # 「**:=: 準備書面**」「**# 見出し**」
-        align, line = split_align(line)
-        _, left_mark, first_mark, line = split_lead_marks(line)
-        left_indent = left_indent_of(left_mark) if left_mark else None
-        if first_mark:
+        lead = split_lead_marks(line)
+        align, line = ALIGN_MARKS[lead.align] if lead.align else JUSTIFY, lead.rest
+        left_indent = left_indent_of(lead.left) if lead.left else None
+        area = area_of(lead.area)
+        if lead.first:
             indent += 1
-            if seen and left_indent is None:
+            if seen and left_indent is None and area is None:
                 stopped = True      # 見出しの後の -> は、右揃えの段落と同じく変換を止める（その段落から）
-        if not stopped and left_indent is None:      # +N の段落は、見出しなどに変換しない
+        if not stopped and left_indent is None and area is None:      # +N の段落は、見出しなどに変換しない
             m_head = HEADING_MARK_RE.match(line)
             m_num = _NUMBERED_RE.match(line)
         else:
             m_head = m_num = None
-        if m_head:
+        if area:
+            # ヘッダー・フッター：見出し・本文として整えない段落と同じく組み、本文の行は使わない
+            p = Para(line, area=area, first_indent=indent, left_indent=left_indent)
+        elif m_head:
             level = len(m_head.group(1))
             line = line[m_head.end():]
             seen = True
@@ -541,7 +559,7 @@ def parse(lines, dt):
                                                                  found.distribute)
             p.src_cols = [p.src_col + c for c in found.cols]
         paras.append(p)
-        if seen and align == RIGHT:
+        if seen and align == RIGHT and area is None:
             stopped = True
     # 複合見出し：字のない見出しのすぐ後が見出しなら、1行にまとめる（左インデントの増加量が1字の文書の種類だけ）
     if dt.left_add == 1:

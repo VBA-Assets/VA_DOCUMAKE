@@ -108,7 +108,7 @@ class Session:
     def typeset(self, text):
         """組む。組んだ結果とエディターの位置の対応（確認表示との連動に使う）を self.layout_map に残す。"""
         cleaned, origins, _ = clean_lines(text)
-        ts = Typesetter(self.doc_type)
+        ts = Typesetter(self.doc_type, self.settings.page_number)
         paras = parse(cleaned, self.doc_type)
         lines = ts.layout(paras)
         self.layout_map = LayoutMap(ts, lines, paras, cleaned, origins)
@@ -303,8 +303,7 @@ class Session:
         self.version = max(content.version, pdf_version)
         if content.settings is not None:
             self.settings = content.settings
-        self.prompt = (None if content.prompt is None or content.prompt.rstrip() == vadm.PROMPT.rstrip()
-                       else content.prompt)
+        self.prompt = None if content.prompt is None or vadm.is_default_prompt(content.prompt) else content.prompt
         self.dictionary = d
         self.pdf_path = Path(pdf_path) if pdf_path else None
         self.vadm_file = Path(path)

@@ -9,6 +9,10 @@
 ・均等割付の範囲の境目は PDF の字の並びに残らないので、字の位置（1字目の左端から字数の幅）で求め、両方の
   文字列の同じ位置に区切りを入れてから突き合わせる（範囲の中の記号と外の記号が隣り合うと、切れ目が定まらないため。
   2026-10-25）。
+・ヘッダー・フッター（[HEADER] [FOOTER]。2026-10-25）の字は、上下の余白の字をページごとに描いた順に取り出し（ページの
+  最後に描くページ番号は除く）、本文の後ろに、ヘッダー（セクションの最初のページにだけある）をページの順に、続けて
+  フッター（セクションの全ページにある。続くページで同じものは1つにまとめる）を続ける。構文ファイルの側も、セクション
+  ごとのヘッダー、まとめたフッターの順に続ける。
 ・求めた語で目印を置き換えた文字列が PDF の文字列と一致すれば、すべての記号が確かに求まっている（exact）。
 試作（試作\\recover_map.py）で、同じ版なら短い文書・14ページの文書とも、すべての記号の元の語が求まった。
 """
@@ -19,17 +23,18 @@ from dataclasses import dataclass, field
 
 import fitz  # PyMuPDF
 
-from .doctypes import DOC_TYPES
-from .document import TABLE, TOC, parse
+from .doctypes import DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_NONE
+from .document import FOOTER, HEADER, SECTION_BREAK, TABLE, TOC, parse
 from .document import heading_label
-from .layout import toc_entries
+from .layout import _NAIYOU, toc_entries
 from .layout import Typesetter
-from .pdfwriter import read_id
+from .pdfwriter import page_number_text, read_id
 from .pseudonym import TOKEN_RE, Dictionary, normalize_token
 
 _MARK_BASE = 0xE000
 _TOC_FILL = "\uF8FF"     # 目次の点線とページ番号の位置（PDF にだけある。一致の確かめでは「点の並び＋数字」とみなす）
 _SEP = "\x1f"           # 均等割付の範囲の境目（突き合わせのときだけ、両方の文字列の同じ位置に入れる）
+_AREA_SEP = chr(0xF8FE)  # ヘッダー・フッターの字の、ページ（セクション）ごとの切れ目（両方の文字列に入れる）
 _SPACE_RE = re.compile(r"\s+")
 
 
@@ -63,6 +68,36 @@ def pdf_body_text(path, ts):
     return "".join(out), where
 
 
+def pdf_area_text(path, ts, page_number=PAGE_NUMBER_BOTTOM_CENTER):
+    """PDF のヘッダー・フッター（上下の余白）の字を1本の文字列にする。ページ番号（ページの最後に描く。pdfwriter）は
+    除く。ヘッダーの字のあるページのヘッダーをページの順に並べ、続けてフッターを並べる（フッターは、字のないページを
+    飛ばし、前のページと同じものは1つにまとめる。セクションの全ページに出るため）。ページごとの初めに _AREA_SEP を
+    入れる。(文字列, 位置) を返す。"""
+    top = ts.margin_top
+    bottom = ts.margin_top + ts.lines_page * ts.line_pitch
+    heads, feet, prev = [], [], None
+    with fitz.open(path) as doc:
+        for pi, page in enumerate(doc):
+            chars = [(chr(ch[0]), (pi, *ch[2])) for span in page.get_texttrace() for ch in span["chars"]]
+            if page_number != PAGE_NUMBER_NONE:
+                s = page_number_text(page_number, pi + 1, len(doc))
+                if "".join(c for c, _ in chars[-len(s):]) == s:
+                    chars = chars[:-len(s)]
+            head = [c for c in chars if c[1][2] <= top]
+            foot = [c for c in chars if c[1][2] > bottom + 1]
+            if "".join(c for c, _ in head).strip():
+                heads.append(head)
+            text = "".join(c for c, _ in foot)
+            if text.strip() and text != prev:
+                feet.append(foot)
+                prev = text
+    out, where = [], []
+    for chars in heads + feet:
+        out.append(_AREA_SEP + "".join(c for c, _ in chars))
+        where += [(-1, 0.0, 0.0)] + [w for _, w in chars]
+    return "".join(out), where
+
+
 def vadm_body_text(lines, dt):
     """構文ファイルの文書を、PDF と同じ並びの文字列にする。
 
@@ -82,8 +117,13 @@ def vadm_body_text(lines, dt):
         spans.extend((pos + shift + a, pos + shift + b, n) for a, b, n in distribute)
         parts.append(text)
         pos += len(text)
+    sections = [{HEADER: [], FOOTER: []}]
     for p in paras:
-        if p.kind == TABLE:
+        if p.area:
+            sections[-1][p.area].append(p)      # 本文の後ろに続ける（下）
+        elif p.kind == SECTION_BREAK:
+            sections.append({HEADER: [], FOOTER: []})
+        elif p.kind == TABLE:
             for ri, row in enumerate([p.table.header] + p.table.rows):
                 for k, (_, text) in enumerate(row):
                     add(text, p.table.distribute.get((ri, k), ()))
@@ -94,6 +134,20 @@ def vadm_body_text(lines, dt):
                 add(number.rstrip(" 　") + (" " if number.strip() else "") + h.text + _TOC_FILL)
         else:
             add(p.number + p.text, p.distribute, len(p.number))
+    # ヘッダー・フッター（pdf_area_text と同じ並び）：セクションごとのヘッダー、続けてフッター。字のないものは飛ばし、
+    # フッターは前のセクションと同じものを1つにまとめる。内容証明では組まない
+    groups, prev = [], None
+    if dt.key != _NAIYOU:
+        groups = [s[HEADER] for s in sections if "".join(p.text for p in s[HEADER]).strip()]
+        for s in sections:
+            text = "".join(p.text for p in s[FOOTER])
+            if text.strip() and text != prev:
+                groups.append(s[FOOTER])
+                prev = text
+    for group in groups:
+        add(_AREA_SEP)
+        for p in group:
+            add(p.text, p.distribute)
     return "".join(parts), {v: k for k, v in marks.items()}, spans
 
 
@@ -220,11 +274,13 @@ def _orig_positions(s):
     return out
 
 
-def recover(vadm_lines, pdf_path, dt):
-    """突き合わせて Recovery を返す。"""
+def recover(vadm_lines, pdf_path, dt, page_number=PAGE_NUMBER_BOTTOM_CENTER):
+    """突き合わせて Recovery を返す。page_number は PDF のページ番号の位置（ヘッダー・フッターの字から除くため）。"""
     ts = Typesetter(dt)
     v_plain, mark_to_token, spans = vadm_body_text(vadm_lines, dt)
     p_plain, where = pdf_body_text(pdf_path, ts)
+    area_text, area_where = pdf_area_text(pdf_path, ts, page_number)
+    p_plain, where = p_plain + area_text, where + area_where
     v, p = _separate_distribute(v_plain, p_plain, where, spans, mark_to_token, ts)
     sm = difflib.SequenceMatcher(None, v, p, autojunk=False)
     votes = defaultdict(Counter)
@@ -302,7 +358,8 @@ def rebuild_dictionary(content, pdf_path, doc_type=None):
         raise PdfMismatch("この PDF は、構文ファイルと同じ文書のものではありません。")
     if doc_type is None:
         doc_type = content.settings.doc_type if content.settings else "Saiban"
-    r = recover(content.body, pdf_path, DOC_TYPES[doc_type])
+    page_number = content.settings.page_number if content.settings else PAGE_NUMBER_BOTTOM_CENTER
+    r = recover(content.body, pdf_path, DOC_TYPES[doc_type], page_number)
     d = Dictionary()
     for m in TOKEN_RE.finditer(content.body_text):
         d.note_used(m.group(0))
