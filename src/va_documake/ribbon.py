@@ -82,6 +82,7 @@ class Ribbon(ttk.Frame):
         super().__init__(master, style="Ribbon.TFrame")
         self.icons = icons
         self.groups = []
+        self._lines = []          # 段ごとの枠
         self._layout = None
         self.bind("<Configure>", lambda e: self.reflow(e.width))
 
@@ -107,9 +108,19 @@ class Ribbon(ttk.Frame):
         if layout == self._layout:
             return
         self._layout = layout
+        # 段ごとに枠を分け、組を左から詰めて置く（1つの表に段と列で置くと、2段目の組が1段目の同じ列の幅に
+        # 広げられ、組の間が空いた。2026-10-25 班長指摘）
+        while len(self._lines) < len(rows):
+            self._lines.append(ttk.Frame(self, style="Ribbon.TFrame"))
+        for r, line in enumerate(self._lines):
+            if r < len(rows):
+                line.grid(row=r, column=0, sticky="w")
+            else:
+                line.grid_remove()
         for r, row in enumerate(rows):
             for c, g in enumerate(row):
-                g.grid(row=r, column=c, sticky="nsw")
+                g.grid(in_=self._lines[r], row=0, column=c, sticky="nsw")
+                g.lift(self._lines[r])      # 組は段の枠より先に作るので、枠の上に出す
 
 
 def labeled_rows(parent, rows):

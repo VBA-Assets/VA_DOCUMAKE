@@ -327,6 +327,14 @@ def test_ribbon_groups_and_reflow(window):
     assert len(rb._layout) == 2 and len(rb._layout[1]) == 1                  # 入らない最後の組だけを次の段に
     rb.reflow(400)
     assert len(rb._layout) >= 2
+    # どの段も、組を左から詰めて置く（上の段の組の幅に引きずられて間が空かない。2026-10-25 班長指摘）
+    window.update_idletasks()
+    by_id = {id(g): g for g in rb.groups}
+    for row in rb._layout:
+        groups = [by_id[i] for i in row]
+        assert groups[0].winfo_x() == 0
+        for a, b in zip(groups, groups[1:]):
+            assert b.winfo_x() == a.winfo_x() + a.winfo_reqwidth()
     rb.reflow(full + 10)
     assert len(rb._layout) == 1
 
