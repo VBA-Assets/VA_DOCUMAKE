@@ -40,8 +40,9 @@ UI_FONT_SIZE = 9
 # 入力欄の書体（全角・半角の幅がそろい、見分けやすいもの）。先にあるものを使う
 EDITOR_FONT_FAMILIES = ("BIZ UDゴシック", "BIZ UDGothic", "ＭＳ ゴシック", "MS Gothic")
 EDITOR_FONT_SIZE = 11
-# 入力欄の行の間隔（画素。行の上と下に足す。折り返した行の間にも足す）
-EDITOR_LINE_SPACING = 8
+# 入力欄の行の間隔（ポイント。行の上と下に足す。折り返した行の間にも足す）。字の大きさや Word の段落の前後の間隔と
+# 同じ単位にし、表示の拡大（125%・150% など）でも字と一緒に広がるようにする（2026-10-26 班長決定。それまでは画素）
+EDITOR_LINE_SPACING = 6
 
 
 # オプションで選べるエディターの書体（全角と半角の幅がそろう等幅のもの。2026-10-24 班長指示）。この PC にあるものだけ出す
@@ -54,8 +55,10 @@ def set_editor_prefs(family, size, spacing):
     _editor.update(family=family or "", size=size, spacing=spacing)
 
 
-def editor_line_spacing():
-    return _editor["spacing"]
+def editor_spacing(widget):
+    """行の間隔（ポイント）を、Text の spacing1・spacing2・spacing3（画素）にする。"""
+    px = round(_editor["spacing"] * widget.winfo_fpixels("1p"))
+    return {"spacing1": px // 2, "spacing2": px, "spacing3": px - px // 2}
 
 
 def editor_font_choices(root):

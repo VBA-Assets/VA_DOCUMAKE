@@ -1,5 +1,6 @@
 """画面（仕様.md の4）。確認画面（モーダル）は差し替えて、画面の操作の流れを確かめる。"""
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -8,8 +9,9 @@ tk = pytest.importorskip("tkinter")
 
 from tkinter import messagebox  # noqa: E402
 
-from va_documake import ai_ops, app, config, file_ops, theme, vadm  # noqa: E402
+from va_documake import ai_ops, app, config, editor_ops, file_ops, theme, vadm  # noqa: E402
 from va_documake.pdfwriter import read_id  # noqa: E402
+from va_documake.editor_ops import EDITOR_MARK_WATCH_MS  # noqa: E402
 
 TEXT = "原告　甲野太郎\n:=: 準備書面（１）\n# 認否\n甲野太郎の主張は争う。\n"
 PSEUDO = TEXT.replace("甲野太郎", "〔人名Ａ〕")      # エディターは常に仮名（2026-10-24 班長決定）
@@ -362,8 +364,9 @@ def _canvas_point(window, line, col):
         window._page_tops[page] + (top + h / 2) * z - window.canvas.canvasy(0), page
 
 
-def test_editor_and_preview_are_linked(window):
+def test_editor_and_preview_are_linked(window, monkeypatch):
     """エディターのカーソル → 確認表示のページ、確認表示のクリック → エディターのカーソル。"""
+    monkeypatch.setattr(editor_ops, "EDITOR_MARK_BLINK_MS", 0)     # ▼ の点滅は別の試験で確かめる
     window.deiconify()
     window.geometry("1200x800")
     text = (Path(__file__).parent / "data" / "長い文書" / "見本.md").read_text(encoding="utf-8")
@@ -387,10 +390,125 @@ def test_editor_and_preview_are_linked(window):
     line = last - 3
     col = len(text.splitlines()[line]) - 2     # 本文の字（行頭の「##」などの記号の上ではない）
     x, y, page = _canvas_point(window, line, col)
+    window.text.yview_moveto(0)
+    window.update()
     window.on_preview_click(_Click(x, y))
     assert window.text.index("insert") == f"{line + 1}.{col}"
+    # 文書の終わりの近くの行も、エディターに見え（3分の1の高さまでは送れない）、▼ が出る（2026-10-26 班長指摘。
+    # 一番上まで送れないのに決まった高さだけ戻していたため、行が下の端から外れていた）
+    window.update()
+    info = window.text.dlineinfo("insert")
+    assert info is not None and info[1] + info[3] <= window.text.winfo_height()
+    assert window._editor_mark.winfo_ismapped()
+    # 動かした先は、エディターの上から3分の1の高さに送り（見えていた行でも）、カーソルの上に ▼ を出す
+    view_h = window.text.winfo_height()
+    for scroll_to in (0.0, None):       # 見えていない行へ動かすとき、見えている行へ動かすとき
+        if scroll_to is not None:
+            window.text.yview_moveto(scroll_to)
+            window.update()
+        line = len(text.splitlines()) // 2
+        col = len(text.splitlines()[line]) // 2
+        assert (window.text.dlineinfo(f"{line + 1}.{col}") is None) == (scroll_to is not None)
+        x, y, page = _canvas_point(window, line, col)
+        window.on_preview_click(_Click(x, y))
+        window.update()
+        info = window.text.dlineinfo("insert")
+        assert info is not None and abs(info[1] - view_h // 3) <= info[3]
+        mark = window._editor_mark
+        assert mark.winfo_ismapped()
+        box = window.text.bbox("insert")
+        assert abs(mark.winfo_x() + mark.winfo_width() / 2 - box[0]) <= 1     # カーソル（字と字の間）の上
+        assert mark.winfo_y() + mark.winfo_height() == box[1]
+    # ▼ は常に出しておき、カーソルと一緒に動かす（送ったとき・カーソルを動かしたとき・字を打ったとき）。
+    # カーソルが見えないところへ送ったときだけ消す
+    def mark_on_caret():
+        window.update()
+        box = window.text.bbox("insert")
+        return (mark.winfo_ismapped() and box is not None
+                and abs(mark.winfo_x() + mark.winfo_width() / 2 - box[0]) <= 1
+                and mark.winfo_y() + mark.winfo_height() == box[1])
+    window.text.yview_scroll(2, "units")
+    assert mark_on_caret()
+    window.text.mark_set("insert", "insert +3c")
+    window.text.event_generate("<KeyRelease>", keysym="Right")
+    assert mark_on_caret()
+    window.text.insert("insert", "あいう")
+    assert mark_on_caret()
+    window.text.delete("insert -3c", "insert")
+    window.text.yview_moveto(0)
+    window.update()
+    assert window.text.bbox("insert") is None and not mark.winfo_ismapped()
+    window.text.see("insert")
+    assert mark_on_caret()
+    # 検索などでプログラムがカーソルだけを動かしたとき（出来事が来ない）も、しばらくすると置き直す
+    window.text.mark_set("insert", "insert linestart")
+    end = time.monotonic() + (EDITOR_MARK_WATCH_MS + 200) / 1000
+    while time.monotonic() < end:
+        window.update()
+    assert mark_on_caret()
     window.withdraw()
 
+
+def test_editor_mark_blinks_when_caret_moves(window, monkeypatch):
+    """カーソルを動かしたときは ▼ を点滅させてから出したままにし、字を打ったときは点滅させない。確認表示の ▼ も
+    同時に点滅させる（2026-10-26 班長指示）。"""
+    monkeypatch.setattr(editor_ops, "EDITOR_MARK_BLINK_MS", 400)
+    monkeypatch.setattr(editor_ops, "EDITOR_MARK_BLINK_STEP_MS", 50)
+    window.deiconify()
+    window.geometry("1200x800")
+    window.update()
+    window._layout_pages(keep=False)
+    window.update()
+    window.text.focus_force()           # キーの出来事は、フォーカスのある部品に届く
+    mark = window._editor_mark
+
+    def preview_caret_shown():
+        items = window.canvas.find_withtag("caret")
+        assert items                                                    # 確認表示の ▼ がある
+        return window.canvas.itemcget(items[0], "state") != "hidden"
+
+    def run(ms):
+        end = time.monotonic() + ms / 1000
+        while time.monotonic() < end:
+            window.update()
+
+    def settle():
+        run(EDITOR_MARK_WATCH_MS + 100)     # プログラムで動かしただけ（出来事がない）なら、見回りで知るまで
+        end = time.monotonic() + 3          # 前の試験で始まった点滅（2秒）が残っていることがある
+        while window._blink_job is not None and time.monotonic() < end:
+            window.update()
+        run(100)
+        assert window._blink_job is None and mark.winfo_ismapped()      # 点滅が終われば出したまま
+        assert preview_caret_shown()
+
+    window.text.mark_set("insert", "2.0")
+    window.text.see("insert")
+    settle()
+    # カーソルを動かす（矢印キー・確認表示を押す）と点滅する
+    window.text.mark_set("insert", "2.2")
+    window.text.event_generate("<KeyRelease>", keysym="Right")
+    window.update()
+    assert window._blink_job is not None
+    seen = set()
+    end = time.monotonic() + 0.3
+    while time.monotonic() < end:
+        window.update()
+        seen.add((bool(mark.winfo_ismapped()), preview_caret_shown()))
+    assert seen == {(True, True), (False, False)}                       # 両方そろって点滅する
+    # 点滅の途中で確認表示の ▼ を描き直しても（カーソルの字のページを出し直すときなど）、そろったまま
+    window._set_mark_visible(False)
+    window._show_caret(scroll=False)
+    assert not preview_caret_shown()
+    settle()
+    # 字を打つ（カーソルも動く）ときは点滅させない
+    window.text.insert("insert", "あ")
+    window.text.event_generate("<KeyRelease>", keysym="a")
+    window.update()
+    assert window._blink_job is None and mark.winfo_ismapped()
+    window.text.delete("insert -1c")
+    window.update()
+    assert window._blink_job is None
+    window.withdraw()
 
 def test_linking_converts_token_lengths(window):
     """エディターは仮名なので、記号と元の語の長さの違いを換算して確認表示と連動する。"""
@@ -1131,8 +1249,8 @@ def test_options_change_folder_and_editor(window, tmp_path, monkeypatch):
 
     class Answer:
         def __init__(self, parent, cfg, choices, size_range, spacing_range, prompt, default_prompt):
-            assert size_range == (8, 20) and spacing_range == (0, 20) and prompt == default_prompt
-            self.result = {"vadm_folder": str(shared), "font_family": family, "font_size": 14, "line_spacing": 12,
+            assert size_range == (8, 20) and spacing_range == (6, 15) and prompt == default_prompt
+            self.result = {"vadm_folder": str(shared), "font_family": family, "font_size": 14, "line_spacing": 9,
                            "prompt": None}
     monkeypatch.setattr(app, "OptionsDialog", Answer)
     window.on_options()
@@ -1142,14 +1260,14 @@ def test_options_change_folder_and_editor(window, tmp_path, monkeypatch):
     assert window.session.vadm_path == old                      # 今の文書は、これまでの構文ファイル
     from tkinter import font as tkfont
     assert tkfont.Font(window, font=window.text.cget("font")).actual("size") == 14
-    assert int(str(window.text.cget("spacing2"))) == 12
+    assert int(str(window.text.cget("spacing2"))) == round(9 * window.winfo_fpixels("1p"))     # ポイントを画素に
     saved = app.config.load(app.config.config_path())
-    assert (saved.editor_font_size, saved.editor_line_spacing, saved.vadm_folder) == (14, 12, str(shared))
+    assert (saved.editor_font_size, saved.editor_line_spacing_pt, saved.vadm_folder) == (14, 9, str(shared))
     # 新しい文書は、新しい場所に保存する
     monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
     assert window.on_close_document()
     assert window.session.vadm_path.parent == shared
-    window.cfg.editor_font_size, window.cfg.editor_line_spacing, window.cfg.editor_font_family = 11, 8, ""
+    window.cfg.editor_font_size, window.cfg.editor_line_spacing_pt, window.cfg.editor_font_family = 11, 6, ""
     window._apply_editor_prefs()
 
 
@@ -1177,8 +1295,20 @@ def test_close_document_starts_new_one(window, monkeypatch):
 
 
 def test_config_rejects_out_of_range_options():
-    cfg = app.config.AppConfig(editor_font_size=99, editor_line_spacing=-3, editor_font_family=5)
-    assert (cfg.editor_font_size, cfg.editor_line_spacing, cfg.editor_font_family) == (11, 8, "")
+    cfg = app.config.AppConfig(editor_font_size=99, editor_line_spacing_pt=-3, editor_font_family=5)
+    assert (cfg.editor_font_size, cfg.editor_line_spacing_pt, cfg.editor_font_family) == (11, 6, "")
+
+
+def test_config_reads_old_line_spacing_in_pixels(tmp_path):
+    """Ver150 までの行の間隔（画素）は、ポイントに直して読む（2026-10-26 班長決定。単位をポイントにした）。"""
+    path = tmp_path / "settings.json"
+    for old, pt in ((8, 6), (12, 9), (20, 15), (0, 6)):
+        path.write_text(json.dumps({"editor_line_spacing": old}), encoding="utf-8")
+        assert app.config.load(path).editor_line_spacing_pt == pt
+    path.write_text(json.dumps({"editor_line_spacing": 20, "editor_line_spacing_pt": 7}), encoding="utf-8")
+    assert app.config.load(path).editor_line_spacing_pt == 7       # 新しい値があれば、そちらを使う
+    app.config.save(app.config.load(path), path)
+    assert "editor_line_spacing" not in json.loads(path.read_text(encoding="utf-8"))     # 古い値は書かない
 
 
 def test_ai_prompt_in_options(window, tmp_path, monkeypatch):
@@ -1192,7 +1322,7 @@ def test_ai_prompt_in_options(window, tmp_path, monkeypatch):
         class Answer:
             def __init__(self, parent, cfg, choices, size_range, spacing_range, prompt, default_prompt):
                 self.result = {"vadm_folder": cfg.vadm_folder, "font_family": cfg.editor_font_family,
-                               "font_size": cfg.editor_font_size, "line_spacing": cfg.editor_line_spacing,
+                               "font_size": cfg.editor_font_size, "line_spacing": cfg.editor_line_spacing_pt,
                                "prompt": prompt_text}
         return Answer
     monkeypatch.setattr(app, "OptionsDialog", answer(custom))

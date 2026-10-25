@@ -90,7 +90,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         theme.apply_theme(self)
         self.cfg = cfg or config.load()
         # オプションのエディターの書体・字の大きさ・行の間隔（2026-10-24 班長指示）
-        theme.set_editor_prefs(self.cfg.editor_font_family, self.cfg.editor_font_size, self.cfg.editor_line_spacing)
+        theme.set_editor_prefs(self.cfg.editor_font_family, self.cfg.editor_font_size, self.cfg.editor_line_spacing_pt)
         self.session = Session(self.cfg)
         self._refresh_job = None
         self._preview_doc = None
@@ -359,11 +359,11 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # エディターは常に仮名（記号）で表示し、実名は確認表示で見る（実名・仮名の切り替えはなくした。2026-10-24 班長決定）
         editor = ttk.Frame(work, padding=(4, 0, 0, 0))
         editor.pack(fill="both", expand=True)
-        sp = theme.editor_line_spacing()
         self.text = tk.Text(editor, wrap="char", undo=True, font=theme.editor_font(self), padx=6, pady=6,
-                            spacing1=sp // 2, spacing2=sp, spacing3=sp - sp // 2)
+                            **theme.editor_spacing(self))
+        self._init_editor_mark()        # カーソルの上の ▼（2026-10-26 班長決定）
         ys = ttk.Scrollbar(editor, orient="vertical", command=self.text.yview)
-        self.text.configure(yscrollcommand=ys.set)
+        self.text.configure(yscrollcommand=lambda first, last: (ys.set(first, last), self._schedule_editor_mark()))
         ys.pack(side="right", fill="y")
         self.text.pack(side="left", fill="both", expand=True)
         self.text.tag_configure("registered", background=theme.REGISTERED_BG)
@@ -377,7 +377,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # 蛍光ペン（==文字==）の字は黄色の地で示す。仮名化した語・検索で見つけた字の地の色を優先する（下に置く）
         self.text.tag_configure("highlight", background=theme.HIGHLIGHT_BG)
         self.text.tag_lower("highlight")
-        self.text.bind("<<Modified>>", self.on_text_modified)
+        self.text.bind("<<Modified>>", self.on_text_modified, add="+")     # ▼ の置き直し（_init_editor_mark）を消さない
         # IME の入力中の文字を、エディターと同じ書体・大きさで表示する（2026-10-23 班長指摘）
         self.text.bind("<FocusIn>", lambda e: self.after_idle(self._fit_ime), add="+")
         # 貼り付け（Ctrl+V）は、仮名化した語を記号に置き換えて貼る（エディターは常に仮名。2026-10-24）
@@ -534,7 +534,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
             self.cfg.vadm_folder = r["vadm_folder"]
         self.cfg.editor_font_family = r["font_family"]
         self.cfg.editor_font_size = r["font_size"]
-        self.cfg.editor_line_spacing = r["line_spacing"]
+        self.cfg.editor_line_spacing_pt = r["line_spacing"]
         if r["prompt"] is not None:
             # AI への指示：今の文書と、これから作る文書に使う。保存してある構文ファイルの指示も書き直す
             custom = None if vadm.is_default_prompt(r["prompt"]) else r["prompt"]
@@ -547,10 +547,9 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
 
     def _apply_editor_prefs(self):
         """オプションのエディターの書体・字の大きさ・行の間隔を、エディターに当てる。"""
-        theme.set_editor_prefs(self.cfg.editor_font_family, self.cfg.editor_font_size, self.cfg.editor_line_spacing)
+        theme.set_editor_prefs(self.cfg.editor_font_family, self.cfg.editor_font_size, self.cfg.editor_line_spacing_pt)
         family, size = theme.editor_font(self)
-        sp = theme.editor_line_spacing()
-        self.text.configure(font=(family, size), spacing1=sp // 2, spacing2=sp, spacing3=sp - sp // 2)
+        self.text.configure(font=(family, size), **theme.editor_spacing(self))
         self.text.tag_configure("bold", font=(family, size, "bold"))
         self._fit_ime()
 

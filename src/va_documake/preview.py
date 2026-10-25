@@ -152,14 +152,20 @@ class PreviewMixin:
         mid = cx
         char_top = cy + (h - FONT_SIZE) / 2 * z
         s = max(CARET_MIN_SIZE, CARET_SIZE * z)
+        # エディターの ▼ が点滅の途中（消えているところ）なら、確認表示の ▼ も消した形で描く（そろえて点滅させる）
         self.canvas.create_polygon(mid - s, char_top - s * 1.6, mid + s, char_top - s * 1.6, mid, char_top - 1,
-                                   fill=theme.ACCENT, outline="", tags="caret")
+                                   fill=theme.ACCENT, outline="", tags="caret",
+                                   state="hidden" if self._blink_hidden else "normal")
         if scroll:
             view_top, view_h = self.canvas.canvasy(0), self.canvas.winfo_height()
             if cy < view_top or cy + h * z > view_top + view_h:
                 total_h = self._page_tops[-1] + self._page_size[1] + PAGE_GAP
                 self.canvas.yview_moveto(max(0.0, (cy - view_h / 3) / total_h))
                 self._render_visible()
+
+    def _set_preview_caret_visible(self, visible):
+        """確認表示の ▼ を、出す・消す（エディターの ▼ と一緒に点滅させる。2026-10-26 班長指示）。"""
+        self.canvas.itemconfigure("caret", state="normal" if visible else "hidden")
 
     def on_preview_click(self, event):
         """確認表示でクリックした字の位置に、エディターのカーソルを動かす。"""
@@ -184,8 +190,9 @@ class PreviewMixin:
         index = f"{line + 1}.{col}"
         self.text.tag_remove("sel", "1.0", "end")
         self.text.mark_set("insert", index)
-        self.text.see(index)
+        self._scroll_to_third(index)
         self.text.focus_set()
+        self._schedule_editor_mark()
         self._show_caret(scroll=scroll)
 
     def _on_yscroll(self, first, last):

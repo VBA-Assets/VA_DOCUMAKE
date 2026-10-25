@@ -17,7 +17,7 @@ from .vadm import default_folder
 
 MAX_PDF_FOLDERS = 50
 FONT_SIZE_RANGE = (8, 20)       # オプションで選べるエディターの字の大きさ（ポイント）
-LINE_SPACING_RANGE = (0, 20)    # 同じく行の間隔（画素）
+LINE_SPACING_RANGE = (6, 15)    # 同じく行の間隔（ポイント。6 より狭いと、エディターのカーソルの上の ▼ が行の間に入らない。2026-10-26 班長決定）
 
 
 def config_path():
@@ -41,7 +41,7 @@ class AppConfig:
     # オプション（2026-10-24 班長指示）。書体の "" は既定（BIZ UDゴシック、なければＭＳ ゴシック）
     editor_font_family: str = ""
     editor_font_size: int = EDITOR_FONT_SIZE
-    editor_line_spacing: int = EDITOR_LINE_SPACING
+    editor_line_spacing_pt: int = EDITOR_LINE_SPACING     # Ver151 から。それまでは editor_line_spacing（画素）
     ai_prompt: str = ""             # 利用者が直した AI への指示（"" は既定。新しい文書に使う。2026-10-24 班長指示）
 
     def __post_init__(self):
@@ -55,9 +55,9 @@ class AppConfig:
             self.vadm_folder = str(default_folder())
         if not isinstance(self.editor_font_size, int) or not FONT_SIZE_RANGE[0] <= self.editor_font_size <= FONT_SIZE_RANGE[1]:
             self.editor_font_size = EDITOR_FONT_SIZE
-        if (not isinstance(self.editor_line_spacing, int)
-                or not LINE_SPACING_RANGE[0] <= self.editor_line_spacing <= LINE_SPACING_RANGE[1]):
-            self.editor_line_spacing = EDITOR_LINE_SPACING
+        if (not isinstance(self.editor_line_spacing_pt, int)
+                or not LINE_SPACING_RANGE[0] <= self.editor_line_spacing_pt <= LINE_SPACING_RANGE[1]):
+            self.editor_line_spacing_pt = EDITOR_LINE_SPACING
         if not isinstance(self.editor_font_family, str):
             self.editor_font_family = ""
         if not isinstance(self.ai_prompt, str):
@@ -73,6 +73,10 @@ def load(path=None):
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         known = {k: data[k] for k in AppConfig.__dataclass_fields__ if k in data}
+        # Ver150 までの行の間隔（画素。表示の拡大 100% のとき）は、ポイントに直して読む（8 画素 → 6 ポイント）
+        old = data.get("editor_line_spacing")
+        if "editor_line_spacing_pt" not in data and isinstance(old, int) and not isinstance(old, bool):
+            known["editor_line_spacing_pt"] = max(LINE_SPACING_RANGE[0], min(LINE_SPACING_RANGE[1], round(old * 0.75)))
         return AppConfig(**known)
     except (OSError, ValueError, TypeError):
         return AppConfig()

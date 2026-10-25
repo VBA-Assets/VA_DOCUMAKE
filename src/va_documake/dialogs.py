@@ -292,13 +292,13 @@ class OptionsDialog(_Dialog):
         box.pack(fill="x", pady=(10, 0))
         self.family = tk.StringVar(value=cfg.editor_font_family or "（既定）")
         self.size = tk.StringVar(value=str(cfg.editor_font_size))
-        self.spacing = tk.StringVar(value=str(cfg.editor_line_spacing))
+        self.spacing = tk.StringVar(value=str(cfg.editor_line_spacing_pt))
         ttk.Label(box, text="書体").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=2)
         ttk.Combobox(box, textvariable=self.family, state="readonly", width=20,
                      values=["（既定）"] + list(font_choices)).grid(row=0, column=1, sticky="w", pady=2)
         for r, (label, var, rng, unit) in enumerate((("字の大きさ", self.size, size_range, "ポイント"),
                                                      ("行の間隔", self.spacing, spacing_range,
-                                                      "画素（行の上と下に足す間隔）")), start=1):
+                                                      "ポイント（行の上と下に足す間隔）")), start=1):
             ttk.Label(box, text=label).grid(row=r, column=0, sticky="w", padx=(0, 8), pady=2)
             cell = ttk.Frame(box)
             cell.grid(row=r, column=1, sticky="w", pady=2)
