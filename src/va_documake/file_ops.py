@@ -27,18 +27,7 @@ class FileMixin:
         if path:
             self.open_path(Path(path))
 
-    def on_open_copy(self):
-        """過去の文書・テンプレートを、新しい文書として開く（Word の「コピーとして開く」。開いたファイルには書かず、
-        初めて保存するときに保存先を尋ねる。テンプレートを Ctrl+S で上書きしないように。2026-10-25 班長指示）。"""
-        if not self._confirm_discard():
-            return
-        path = filedialog.askopenfilename(parent=self, title="コピーとして開く", filetypes=[
-            ("VA DocuMake（構文ファイル・書式付きファイル）", "*.vadm *.pdf"), ("テキスト・マークダウン", "*.txt *.md"),
-            ("すべてのファイル", "*.*")])
-        if path:
-            self.open_path(Path(path), as_copy=True)
-
-    def open_path(self, path, as_copy=False):
+    def open_path(self, path):
         try:
             suffix = path.suffix.lower()
             if suffix == vadm.EXTENSION:
@@ -59,18 +48,11 @@ class FileMixin:
         if result.unresolved:
             answers = MissingDialog(self, self.session, result).answers
             text = self.session.resolve(answers)
-        if as_copy:
-            self.session.detach(text)
         self._load_text(text)
         self._layout_pages(keep=False)     # 開いた文書は、1ページ目の上から表示する
         for m in result.messages:
             messagebox.showinfo(APP_NAME, m, parent=self)
-        if as_copy:
-            self._update_title()
-            self.status.configure(text=f"コピーとして開きました：{path.name}　新しい文書です（開いたファイルには書きません。"
-                                       "保存するときに、書式付きファイルの保存先を尋ねます）。")
-        else:
-            self.status.configure(text=f"開きました：{path.name}")
+        self.status.configure(text=f"開きました：{path.name}")
 
     def _open_vadm(self, path):
         try:
@@ -115,14 +97,13 @@ class FileMixin:
         self.status.configure(text="文書を閉じました。新しい文書です。")
         return True
 
-    def on_save(self, check_outside=True, allow_unknown=False, save_as=False):
+    def on_save(self, check_outside=True, allow_unknown=False):
         """PDF と構文ファイルを、同じ版で保存する。保存できたら True。
 
         構文ファイルが外で書き換えられていれば（テキストエディターで直した、AI の回答を上書き保存した、など）、
         黙って上書きせず、取り込むか・上書きするかを尋ねる（2026-10-23 班長了承）。
         エディターは常に仮名で、見えているものがそのまま構文ファイルに書かれるので、保存の前の確認画面
         （構文ファイルに書く中身の確認）は出さない（2026-10-24 班長決定）。
-        save_as なら、新しい文書ID の文書として、保存先を尋ねて保存する（名前を付けて保存）。
         """
         text = self.real_text()
         if check_outside and self.session.vadm_changed_outside():
@@ -131,9 +112,9 @@ class FileMixin:
                 return False
             if choice == "import":
                 return self._import_outside()
-        pdf = None if save_as else self.session.pdf_path
+        pdf = self.session.pdf_path
         if pdf is None:
-            pdf = self._ask_pdf_path(save_as)
+            pdf = self._ask_pdf_path()
             if pdf is None:
                 return False
         text = self._guard_tokens(text, allow_unknown)
@@ -144,10 +125,7 @@ class FileMixin:
         if self.session.settings.doc_type == naiyou.DOC_TYPE and not self._check_naiyou(text):
             return False
         try:
-            if save_as:
-                self.session.save_as(text, pdf)
-            else:
-                self.session.save(text, pdf)
+            self.session.save(text, pdf)
         except PermissionError:
             messagebox.showerror(APP_NAME, f"PDF を保存できませんでした。PDF をほかのソフトで開いていれば、閉じてから"
                                  f"もう一度保存してください。\n{pdf}", parent=self)
@@ -156,23 +134,14 @@ class FileMixin:
             messagebox.showerror(APP_NAME, f"保存できませんでした。\n{e}", parent=self)
             return False
         config.save(self.cfg)
-        if save_as:
-            self.text.tag_remove("changed", "1.0", "end")     # 前の文書で AI が変えた段落の印は、新しい文書に引き継がない
         self._update_title()
-        head = "新しい文書として保存しました（前の書式付きファイルと構文ファイルは、そのまま残っています）。" if save_as \
-            else f"版 {self.session.version} を保存しました。"
-        self.status.configure(text=f"{head}書式付き（PDF）：{self.session.pdf_path.name}　"
+        self.status.configure(text=f"版 {self.session.version} を保存しました。書式付き（PDF）：{self.session.pdf_path.name}　"
                                    f"構文（VADM）：{self.session.vadm_path.name}")
         return True
 
-    def on_save_as(self):
-        """名前を付けて保存（F12）：新しい文書ID の文書として、保存先を尋ねて保存する。前の事件の PDF と構文ファイルは
-        上書きしない。仮名化した語の一覧は引き継ぐ（2026-10-25 班長指示）。"""
-        return self.on_save(save_as=True)
-
     def _check_released(self, text):
         """仮名化を解除した語・変える前の元の語が、構文ファイル（AI に渡すもの）に実名のまま残っていれば知らせ、
-        保存するかを尋ねる（使い回した前の事件の名前の残り。2026-10-25 班長指示）。保存してよければ True。
+        保存するかを尋ねる（2026-10-25 班長指示）。保存してよければ True。
         残してよいと答えた語は、もう知らせない。"""
         found = self.session.released_in(text)
         if not found:
@@ -181,7 +150,7 @@ class FileMixin:
         more = f"\n　ほか {len(found) - 10} 語" if len(found) > 10 else ""
         if messagebox.askyesno(APP_NAME, "仮名化を解除した語（または、変える前の元の語）が、文章に残っています：\n"
                                f"{lines}{more}\n\nこのまま保存すると、構文ファイル（AI に渡すもの）に実名のまま書かれます。"
-                               "前の文書（ほかの事件）の名前であれば、直してから保存してください。"
+                               "仮名化するはずの語であれば、直してから保存してください。"
                                "仮名化するときは、語を選んで［選択範囲を仮名化］を押してください。\n\n"
                                "このまま保存しますか？", parent=self):
             self.session.accept_released(found)
@@ -240,25 +209,16 @@ class FileMixin:
             return None
         return text
 
-    def _ask_pdf_path(self, save_as=False):
-        # 名前を付けて保存では、今の PDF のフォルダから選び始める（ファイル名は入れない。前の PDF を上書きしないように）
-        current = self.session.pdf_path
-        extra = {"initialdir": str(current.parent)} if save_as and current else {}
+    def _ask_pdf_path(self):
         while True:
-            path = filedialog.asksaveasfilename(parent=self, title="名前を付けて保存（PDF の保存先）" if save_as else
-                                                "PDF の保存先", defaultextension=".pdf", filetypes=[("PDF", "*.pdf")],
-                                                **extra)
+            path = filedialog.asksaveasfilename(parent=self, title="PDF の保存先", defaultextension=".pdf",
+                                                filetypes=[("PDF", "*.pdf")])
             if not path:
                 return None
             path = Path(path)
             if path.parent.resolve() == Path(self.cfg.vadm_folder).resolve():
                 messagebox.showwarning(APP_NAME, "構文ファイルのフォルダには、書式付きファイル（PDF。実名入り）を保存しないでください。"
                                        "AI がフォルダの中を読むと、実名の PDF に届いてしまいます。", parent=self)
-                continue
-            if save_as and current and path.resolve() == current.resolve():
-                messagebox.showwarning(APP_NAME, "今の書式付きファイル（PDF）と同じ名前です。前の文書を残すため、"
-                                       "別の名前を付けてください（同じ名前で保存するときは［保存］を押してください）。",
-                                       parent=self)
                 continue
             return path
 

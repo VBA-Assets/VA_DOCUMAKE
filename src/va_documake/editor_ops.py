@@ -69,20 +69,6 @@ class EditorMixin:
                 self.text.insert(f"1.0+{a}c", new)
         self.text.edit_modified(False)
 
-    def _restore_in_editor(self, words):
-        """エディターの記号を、元の語に戻す（words は {記号: 語}。英字が半角の記号も戻す。すべて解除で使う）。
-        Ctrl+Z 1回で戻る。"""
-        raw = self.raw_text()
-        spans = [(m.start(), m.end(), words[normalize_token(m.group(0))]) for m in TOKEN_RE.finditer(raw)
-                 if normalize_token(m.group(0)) in words]
-        if not spans:
-            return
-        with undoable(self.text):
-            for a, b, word in reversed(spans):
-                self.text.delete(f"1.0+{a}c", f"1.0+{b}c")
-                self.text.insert(f"1.0+{a}c", word)
-        self.text.edit_modified(False)
-
     def _markdown_spans(self, raw):
         """マークダウンの記号（見出しの #、箇条書きの「- 」、段落番号の「1. 」、表の | と区切りの行）の位置。
 

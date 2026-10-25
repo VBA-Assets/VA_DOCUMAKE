@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from . import APP_NAME, vadm
-from .dialogs import ChangedOutsideDialog, KindDialog, RenameDialog
+from .dialogs import ChangedOutsideDialog, EditDialog, RegisterDialog
 from .pseudonym import KINDS, NotRegistrable, trim_selection
 
 
@@ -35,10 +35,11 @@ class AiMixin:
         except NotRegistrable as e:
             messagebox.showerror(APP_NAME, str(e), parent=self)
             return
-        kind = KindDialog(self, word).result
-        if kind is None:
+        # 記号の英字は自動で振らず、利用者が必ず選ぶ（2026-10-25 班長決定）
+        chosen = RegisterDialog(self, word, self.session.dictionary).result
+        if chosen is None:
             return
-        token = self.session.dictionary.register(word, kind)
+        token = self.session.dictionary.register(word, *chosen)
         self._refresh_dictionary()
         self._tokenize_editor()          # エディターの同じ語を、すべて記号に置き換える
         self._highlight()
@@ -52,8 +53,7 @@ class AiMixin:
             messagebox.showinfo(APP_NAME, "左の一覧で、解除する語を選んでから押してください。", parent=self)
             return
         e = self.session.dictionary.find(sel[0])
-        if e and messagebox.askyesno(APP_NAME, f"「{e.word}」（{e.token}）の仮名化を解除しますか？\n"
-                                     "解除した記号の英字は、ほかの語に使い直しません。", parent=self):
+        if e and messagebox.askyesno(APP_NAME, f"「{e.word}」（{e.token}）の仮名化を解除しますか？", parent=self):
             self._unregister(e.token)
 
     def _unregister(self, token):
@@ -69,52 +69,39 @@ class AiMixin:
         if e:
             self.status.configure(text=f"「{e.word}」（{e.token}）の仮名化を解除しました。")
 
-    def on_unregister_all(self):
-        """仮名化した語をすべて解除し、エディターの記号を元の語に戻す（過去の文書・テンプレートを使い回すとき。
-        2026-10-25 班長指示）。エディターの書き換えは Ctrl+Z 1回で戻る（一覧は戻らない）。"""
-        entries = list(self.session.dictionary.entries.values())
-        if not entries:
-            messagebox.showinfo(APP_NAME, "仮名化した語はありません。", parent=self)
-            return
-        if not messagebox.askyesno(APP_NAME, f"仮名化した {len(entries)} 語をすべて解除し、エディターの記号を元の語に戻しますか？\n\n"
-                                   "解除した語は、次に保存すると構文ファイル（AI に渡すもの）に実名のまま書かれます。"
-                                   "文章に残っていれば、保存するときに知らせます。\n"
-                                   "前の事件の名前を新しい名前にするだけなら、解除せずに［元の語を変える］を使うと、"
-                                   "仮名化したまま変えられます。\n解除した記号の英字は、ほかの語に使い直しません。", parent=self):
-            return
-        self._restore_in_editor({e.token: e.word for e in entries})
-        self.session.unregister_all()
-        self._refresh_dictionary()
-        self._highlight()
-        self._render_preview()
-        self._update_title()
-        self.status.configure(text=f"仮名化した {len(entries)} 語をすべて解除しました。")
-
-    def on_rename(self):
-        """一覧で選んだ記号の元の語を変える（記号はそのまま。前の事件の名前を新しい事件の名前にする。
-        2026-10-25 班長指示）。新しい語がエディターに実名のままあれば、記号に置き換える。"""
+    def on_edit_entry(self):
+        """一覧で選んだ語の、記号と元の語を変える（一覧の行のダブルクリックでも。2026-10-25 班長決定）。元の語を直すと
+        文章の中のその記号がすべて新しい語になり、新しい語がエディターに実名のままあれば記号にする。記号を変えると、
+        エディターの記号も変える（前の記号を別の語に付けるときは、画面で確かめる）。"""
         sel = self.tree.selection()
         if not sel:
-            messagebox.showinfo(APP_NAME, "左の一覧で、元の語を変える記号を選んでから押してください。", parent=self)
+            messagebox.showinfo(APP_NAME, "左の一覧で、変える語を選んでから押してください。", parent=self)
             return
         e = self.session.dictionary.find(sel[0])
         if e is None:
             return
-        word = RenameDialog(self, e).result
-        if word is None or trim_selection(word) == e.word:
+        chosen = EditDialog(self, e, self.session.dictionary).result
+        if chosen is None:
             return
         try:
-            old = self.session.rename(e.token, word)
+            old_word, old_token = self.session.edit(e.token, *chosen)
         except NotRegistrable as err:
             messagebox.showerror(APP_NAME, str(err), parent=self)
             return
+        if old_token != e.token:
+            self._replace_in_editor(old_token, e.token)
         self._refresh_dictionary()
         self.tree.selection_set(e.token)
         self._tokenize_editor()          # 新しい語をエディターに打ってあれば、記号にする
         self._highlight()
         self._render_preview()
         self._update_title()
-        self.status.configure(text=f"{e.token} の元の語を「{old}」から「{e.word}」に変えました。")
+        changes = []
+        if old_token != e.token:
+            changes.append(f"記号を {old_token} から {e.token} に")
+        if old_word != e.word:
+            changes.append(f"元の語を「{old_word}」から「{e.word}」に")
+        self.status.configure(text=("、".join(changes) + "変えました。") if changes else "変えていません。")
 
     def on_copy_vadm(self):
         """構文ファイルの中身をクリップボードに写す（直していれば、先に保存する）。"""

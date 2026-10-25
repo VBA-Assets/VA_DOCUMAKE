@@ -1,9 +1,9 @@
 """確認の画面（種別の選択・外で書き換えられた・記号の元の語・内容証明・オプション）。"""
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
-from . import theme
-from .pseudonym import KINDS
+from . import APP_NAME, theme
+from .pseudonym import KINDS, NotRegistrable, letters_to_number, make_token, token_label, to_wide
 
 
 
@@ -38,50 +38,141 @@ class _Dialog(tk.Toplevel):
         return bar
 
 
-class KindDialog(_Dialog):
-    """仮名化する語の種別を選ぶ。"""
+class _TokenFields:
+    """種別と記号の字の欄（仮名化・一覧の変更の画面で使う）。記号の字は自動で入れず、利用者が必ず打つ（2026-10-25 班長決定。
+    「依頼者はＡから、相手方はＸから」・氏名のイニシャル・番号・漢字など、文書をまたいで同じ人に同じ記号を付けられる
+    ように。英字・数字・漢字などを使え、字数の制限はない。はじめは英字を選ぶボタンだったが、同じ日に打ち込む欄に戻した）。"""
 
-    def __init__(self, parent, word):
-        super().__init__(parent, "種別を選ぶ")
+    def token_fields(self, body, dictionary, kind, letters, keep=None):
+        self.dictionary, self.keep = dictionary, keep
+        self.kind = tk.StringVar(value=kind)
+        self.letters = tk.StringVar(value=letters)
+        row = ttk.Frame(body)
+        row.pack(anchor="w", fill="x", pady=(4, 0))
+        ttk.Label(row, text="種別").pack(side="left", padx=(0, 8))
+        for k in KINDS:
+            ttk.Radiobutton(row, text=k, value=k, variable=self.kind).pack(side="left", padx=(0, 6))
+        row = ttk.Frame(body)
+        row.pack(anchor="w", fill="x", pady=(8, 0))
+        ttk.Label(row, text="記号の字").pack(side="left", padx=(0, 8))
+        self.letters_box = ttk.Entry(row, textvariable=self.letters, width=16)
+        self.letters_box.pack(side="left")
+        self.preview = ttk.Label(row, text="")
+        self.preview.pack(side="left", padx=(12, 0))
+        ttk.Label(body, text="英字・数字・漢字などを使えます（例：Ａ、ＹＴ、１、甲）。", style="Note.TLabel"
+                  ).pack(anchor="w", pady=(4, 0))
+        self.used_label = ttk.Label(body, text="", style="Note.TLabel", wraplength=420, justify="left")
+        self.used_label.pack(anchor="w", pady=(6, 0))
+        self.kind.trace_add("write", lambda *a: self._show())
+        self.letters.trace_add("write", lambda *a: self._show())
+        self._show()
+
+    def _show(self):
+        kind, letters = self.kind.get(), self.letters.get().strip(" 　")
+        self.preview.configure(text=f"記号：〔{kind}{to_wide(letters) or '？'}〕")
+        mine = self.keep.token if self.keep is not None else None
+        current = {e.token: e.word for e in self.dictionary.entries.values()}
+        in_use, released = [], []
+        # 英字の記号を Ａ・Ｂ…ＡＡ の順に先に、ほかの字の記号を後に並べる
+        for label in sorted(self.dictionary.used[kind], key=lambda x: (letters_to_number(x) == 0, letters_to_number(x), x)):
+            token = make_token(kind, label)
+            if token == mine:
+                continue
+            if token in current:
+                in_use.append(f"{token}（{current[token]}）")
+            else:
+                before = self.dictionary.released.get(token)
+                released.append(f"{token}（{before}）" if before else token)
+        # 記号ごとに改行する（Tk の折り返しは、記号の途中や括弧の中でも切れるため）
+        lines = []
+        if in_use:
+            lines += ["この文書で使っている記号（使えません）："] + ["　" + x for x in in_use]
+        if released:
+            lines += ["解除した記号（別の語に付けるときは確かめます）："] + ["　" + x for x in released]
+        self.used_label.configure(text="\n".join(lines) if lines else "この文書で、この種別の記号はまだ使っていません。")
+
+    def target_word(self):
+        """記号を付ける語（解除した記号を別の語に付けるかを確かめるため）。"""
+        raise NotImplementedError
+
+    def checked_token(self):
+        """選んだ種別・記号の字で記号を作れるかを確かめ、(種別, 記号の字) を返す。作れなければ理由を知らせて None
+        （画面は閉じない）。解除した記号を別の語に付けるときは、付けるかを尋ねる（2026-10-25 班長決定）。"""
+        try:
+            token = self.dictionary.check_token(self.kind.get(), self.letters.get(), keep=self.keep)
+        except NotRegistrable as e:
+            messagebox.showerror(APP_NAME, str(e), parent=self)
+            self.letters_box.focus_set()
+            return None
+        if self.keep is None or token != self.keep.token:
+            warning = self.dictionary.reuse_warning(token, self.target_word())
+            if warning and not messagebox.askyesno(APP_NAME, warning, parent=self):
+                self.letters_box.focus_set()
+                return None
+        return self.kind.get(), self.letters.get()
+
+
+class RegisterDialog(_Dialog, _TokenFields):
+    """仮名化する語の種別と記号の字を決める。result は (種別, 記号の字)。"""
+
+    def __init__(self, parent, word, dictionary):
+        super().__init__(parent, "仮名化")
         self.result = None
-        self.kind = tk.StringVar(value=KINDS[0])
+        self.word = word
         body = ttk.Frame(self, padding=(16, 14, 16, 4))
         body.pack(fill="both")
-        ttk.Label(body, text=f"「{word}」を仮名化します。種別を選んでください。").pack(anchor="w", pady=(0, 8))
-        for k in KINDS:
-            ttk.Radiobutton(body, text=k, value=k, variable=self.kind).pack(anchor="w", pady=1)
+        ttk.Label(body, text=f"「{word}」を仮名化します。種別を選び、記号の字を入れてください。").pack(anchor="w")
+        self.token_fields(body, dictionary, KINDS[0], "")
         self.buttons("仮名化する", self.ok)
         self.bind("<Return>", lambda e: self.ok())
+        self.letters_box.focus_set()
         self.run()
 
+    def target_word(self):
+        return self.word
+
     def ok(self):
-        self.result = self.kind.get()
-        self.destroy()
+        self.result = self.checked_token()
+        if self.result is not None:
+            self.destroy()
 
 
-class RenameDialog(_Dialog):
-    """仮名化した語の元の語を変える（記号はそのまま。2026-10-25 班長指示）。"""
+class EditDialog(_Dialog, _TokenFields):
+    """仮名化した語の記号と元の語を変える（2026-10-25 班長決定）。result は (元の語, 種別, 英字)。"""
 
-    def __init__(self, parent, entry):
-        super().__init__(parent, "元の語を変える")
+    def __init__(self, parent, entry, dictionary):
+        super().__init__(parent, "記号・元の語の変更")
         self.result = None
         body = ttk.Frame(self, padding=(16, 14, 16, 4))
         body.pack(fill="both")
-        ttk.Label(body, text=f"{entry.token} の元の語を変えます。文章の中の {entry.token} は、すべて新しい語になります。"
-                  ).pack(anchor="w", pady=(0, 8))
-        ttk.Label(body, text=f"今の語：{entry.word}", style="Note.TLabel").pack(anchor="w", pady=(0, 4))
+        ttk.Label(body, text=f"{entry.token}（{entry.word}）の、元の語と記号を変えます。",
+                  wraplength=420, justify="left").pack(anchor="w", pady=(0, 8))
+        row = ttk.Frame(body)
+        row.pack(anchor="w", fill="x")
+        ttk.Label(row, text="元の語").pack(side="left", padx=(0, 8))
         self.word = tk.StringVar(value=entry.word)
-        box = ttk.Entry(body, textvariable=self.word, width=40)
-        box.pack(anchor="w", fill="x")
-        box.select_range(0, "end")
-        box.focus_set()
+        box = ttk.Entry(row, textvariable=self.word, width=36)
+        box.pack(side="left", fill="x", expand=True)
+        self.token_fields(body, dictionary, entry.kind, token_label(entry.token) or "", keep=entry)
+        # 文ごとに改行する（Tk の折り返しは行頭の禁則を守らず、「AI」の後の空白でも切れるため）
+        ttk.Label(body, text="元の語を直すと、文章の中のこの記号は、すべて新しい語になります（誤字の訂正など）。\n"
+                  "記号を変えると、エディターの記号も変わります（前の書面と記号をそろえるときなど）。\n"
+                  "AI の前の回答にある前の記号は、取り込むときに「仮名化した語にない記号」として知らせます。",
+                  style="Note.TLabel", justify="left").pack(anchor="w", pady=(8, 0))
         self.buttons("変える", self.ok)
         self.bind("<Return>", lambda e: self.ok())
+        box.select_range(0, "end")
+        box.focus_set()
         self.run()
 
+    def target_word(self):
+        return self.word.get()
+
     def ok(self):
-        self.result = self.word.get()
-        self.destroy()
+        token = self.checked_token()
+        if token is not None:
+            self.result = (self.word.get(), *token)
+            self.destroy()
 
 
 class ChangedOutsideDialog(_Dialog):

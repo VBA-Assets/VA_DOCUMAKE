@@ -6,8 +6,6 @@
 ・構文ファイルは、AI に渡す前も後も、テキストエディターや画面で自由に直してよい（2026-10-23 班長指示）。
   直した構文ファイルを開くと、変わっていない部分から対応表を作り直し、求まらない記号は利用者に尋ねる。
   指示の部分を書き換えていれば、保存するときもその指示を残す。
-・過去の文書・テンプレートを使い回すときは、名前を付けて保存・コピーとして開くで、新しい文書ID の文書にする
-  （前の事件の PDF と構文ファイルを上書きしない。2026-10-25 班長指示）。
 """
 import hashlib
 from dataclasses import dataclass, field, replace
@@ -22,7 +20,7 @@ from .document import parse
 from .layout import Typesetter
 from .naiyou import DOC_TYPE as NAIYOU
 from .pdfwriter import pdf_bytes, read_id, write_pdf
-from .pseudonym import Dictionary, tokens_in
+from .pseudonym import Dictionary, NotRegistrable, tokens_in, trim_selection
 from .recover import Recovery, rebuild_dictionary
 from .textmap import LayoutMap
 
@@ -62,22 +60,8 @@ class Session:
         self.layout_map = None          # 最後に組んだ結果とエディターの位置の対応
         self._vadm_stamp = None        # 最後に書いた・読んだ構文ファイルの中身の指紋（外での書き換えを見分ける）
         # 仮名化を解除した語・変える前の元の語（メモリの中だけ）。保存するとき、構文ファイルに実名のまま残って
-        # いれば知らせる（使い回した前の事件の名前の残り。2026-10-25 班長指示）
+        # いれば知らせる（2026-10-25 班長指示）
         self.released = {}
-
-    def detach(self, text=None):
-        """今の文書を、新しい文書（新しい文書ID・版 0・保存先なし）にする。文章・仮名化した語の一覧・設定・
-        AI への指示は引き継ぎ、開いた PDF と構文ファイルには、もう書かない（名前を付けて保存・コピーとして開く。
-        2026-10-25 班長指示）。text があれば、その文章を変えていない状態とする（開いただけでは尋ねない）。"""
-        self.doc_id = vadm.new_doc_id()
-        self.version = 0
-        self.pdf_path = None
-        self.vadm_file = None
-        self._opened_body = None
-        self._vadm_stamp = None
-        self.saved_text = text
-        self.saved_body = None if text is None else self.body(text)
-        self.saved_settings = None if text is None else replace(self.settings)
 
     # ---------- 状態 ----------
 
@@ -178,19 +162,6 @@ class Session:
         self.cfg.doc_type, self.cfg.page_number = self.settings.doc_type, self.settings.page_number
         self.cfg.line_numbers = self.settings.line_numbers
 
-    def save_as(self, text, pdf_path):
-        """新しい文書ID の文書として、版 1 の PDF と構文ファイルを保存する（前の PDF と構文ファイルはそのまま）。
-        保存できなければ、前の文書に戻す。"""
-        keep = {k: getattr(self, k) for k in ("doc_id", "version", "pdf_path", "vadm_file", "_opened_body",
-                                              "_vadm_stamp", "saved_text", "saved_body", "saved_settings")}
-        self.detach()
-        try:
-            self.save(text, pdf_path)
-        except BaseException:
-            for k, v in keep.items():
-                setattr(self, k, v)
-            raise
-
     # ---------- 仮名化の解除・元の語の変更 ----------
 
     def unregister(self, word_or_token):
@@ -200,10 +171,6 @@ class Session:
             self.released[e.word] = None
         return e
 
-    def unregister_all(self):
-        """仮名化した語をすべて解除し、解除した Entry のリストを返す。"""
-        return [self.unregister(e.token) for e in list(self.dictionary.entries.values())]
-
     def rename(self, word_or_token, new_word):
         """仮名化した語の元の語を変え、前の語を返す（前の語は、保存するときの確かめのために覚えておく）。"""
         e = self.dictionary.find(word_or_token)
@@ -212,6 +179,22 @@ class Session:
             self.released[old] = None
             self.released.pop(e.word, None)      # 前に解除した語を、改めて元の語にした
         return old
+
+    def edit(self, token, word, kind, letters):
+        """仮名化した語の元の語と記号を変え、(前の語, 前の記号) を返す（一覧の変更。2026-10-25 班長決定）。どちらかが
+        変えられなければ、どちらも変えずに NotRegistrable を出す。"""
+        e = self.dictionary.find(token)
+        if e is None:
+            raise KeyError(token)
+        self.dictionary.check_token(kind, letters, keep=e)
+        word = trim_selection(word)
+        if word != e.word:
+            if word in self.dictionary.entries:
+                raise NotRegistrable(f"「{word}」は、すでに {self.dictionary.entries[word].token} として仮名化しています。")
+            self.dictionary.check(word)
+        old_word = self.rename(token, word)
+        old_token = self.dictionary.change_token(word, kind, letters)
+        return old_word, old_token
 
     def released_in(self, text):
         """仮名化を解除した語・変える前の元の語のうち、構文ファイル（記号に置き換えた文書）に実名のまま残るもの

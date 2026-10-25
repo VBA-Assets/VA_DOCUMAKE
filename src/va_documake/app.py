@@ -169,7 +169,6 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
                     self.bind(f"<{mod}-Key-{k}>", lambda e: (command(), "break")[1])
         key("o", self.on_open)
         key("s", self.on_save)
-        self.bind("<F12>", lambda e: (self.on_save_as(), "break")[1])     # 名前を付けて保存（Word と同じ）
         key("p", self.on_print)
         key("f", lambda: self.on_find(False))
         key("h", lambda: self.on_find(True), mac=False)
@@ -272,10 +271,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # ［閉じる］は今の文書を閉じて新しい文書にする（VA DocuMake は終わらない）。［オプション］は構文ファイルの
         # 保存場所とエディターの見た目（2026-10-24 班長指示）
         g.small("閉じる", self.on_close_document, "document_dismiss")
-        # 過去の文書・テンプレートを使い回すための［コピーとして開く］［名前を付けて保存］は、［開く］［保存］の右の列に
-        # 同じ高さで置く（2026-10-25 班長指示）
-        g.small("コピーとして開く", self.on_open_copy, "document_copy")
-        g.small("名前を付けて保存", self.on_save_as, "save_edit")
+        # 過去の文書を使い回す［コピーとして開く］［名前を付けて保存］は置かない（2026-10-25 班長決定。仕様.md の9.4）
         g.small("オプション", self.on_options, "settings")
         # 仮名化・コピー・貼り付けは一連の操作なので、1つの組にし、「ファイル」のすぐ右に置く（2026-10-23 班長指示）。
         # ［選択範囲を仮名化］は大きいボタン、［コピー］［貼り付け］はその右に積む小さいボタンにする（2026-10-24・25 班長指示）
@@ -351,14 +347,14 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.tree.configure(yscrollcommand=tys.set)
         self.tree.pack(side="left", fill="x", expand=True)
         tys.pack(side="left", fill="y")
-        # ［すべて解除］［元の語を変える］は、過去の文書・テンプレートを使い回すため（2026-10-25 班長指示）。
-        # 一覧の行をダブルクリックしても、元の語を変えられる
+        # ［変更］は、選んだ語の記号と元の語を変える（2026-10-25 班長決定。登録した語の誤りの訂正と、文書をまたいで
+        # そろえる記号の付け替え。［すべて解除］は、押すと構文ファイルが実名だらけになるので置かない）。
+        # 一覧の行をダブルクリックしても変えられる
         tree_buttons = ttk.Frame(tree_row)
         tree_buttons.pack(side="left", padx=(8, 0), anchor="n")
-        for label, command in (("解除", self.on_unregister), ("すべて解除", self.on_unregister_all),
-                               ("元の語を変える", self.on_rename)):
+        for label, command in (("解除", self.on_unregister), ("変更", self.on_edit_entry)):
             ttk.Button(tree_buttons, text=label, command=command).pack(fill="x", pady=(0, 2))
-        self.tree.bind("<Double-Button-1>", lambda e: self.on_rename() if self.tree.identify_row(e.y) else None)
+        self.tree.bind("<Double-Button-1>", lambda e: self.on_edit_entry() if self.tree.identify_row(e.y) else None)
 
         # エディターは常に仮名（記号）で表示し、実名は確認表示で見る（実名・仮名の切り替えはなくした。2026-10-24 班長決定）
         editor = ttk.Frame(work, padding=(4, 0, 0, 0))

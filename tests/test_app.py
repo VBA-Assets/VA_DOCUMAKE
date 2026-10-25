@@ -101,7 +101,7 @@ def test_editor_is_always_pseudonymized(window, monkeypatch):
     # 選んだ語を仮名化すると、エディターの同じ語がすべて記号になる
     window._load_text(TEXT + "乙山花子と乙山花子。\n")
     window.text.tag_add("sel", "5.0", "5.4")
-    monkeypatch.setattr(ai_ops, "KindDialog", lambda parent, word: type("D", (), {"result": "人名"})())
+    monkeypatch.setattr(ai_ops, "RegisterDialog", lambda parent, word, d: type("D", (), {"result": ("人名", "b")})())
     window.on_register()
     assert window.raw_text().endswith("〔人名Ｂ〕と〔人名Ｂ〕。\n")
     assert window.real_text().endswith("乙山花子と乙山花子。\n")
@@ -672,7 +672,7 @@ def test_buttons_have_icons(window):
                 yield c
             yield from buttons(c)
     found = {str(b.cget("text")).replace("\n", ""): b for b in buttons(window)}
-    for text in ("開く", "保存", "印刷", "閉じる", "コピーとして開く", "名前を付けて保存", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "字下げ", "インデント", "太字", "均等割付",
+    for text in ("開く", "保存", "印刷", "閉じる", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "字下げ", "インデント", "太字", "均等割付",
                  "見出し", "箇条書き", "段落番号", "改ページ", "セクション区切り", "ヘッダー", "検索", "置換", "蛍光ペン", "幅に合わせる"):
         assert found[text].cget("image"), text
         # リボンの大きいボタン（［選択範囲を仮名化］）はアイコンの下に字、ほかはアイコンの右に字
@@ -1282,54 +1282,31 @@ def test_copy_vadm_path(window, tmp_path):
     assert "パスをコピーしました" in str(window.status.cget("text"))
 
 
-def test_save_as_and_open_copy(window, tmp_path, monkeypatch):
-    """名前を付けて保存・コピーとして開く：前の事件の PDF と構文ファイル（テンプレート）を上書きしない（2026-10-25 班長指示）。"""
-    first = tmp_path / "準備書面.pdf"
-    window.session.pdf_path = first
-    assert window.on_save()
-    old_id, old_vadm = window.session.doc_id, window.session.vadm_path
-    old_raw = old_vadm.read_bytes()
-    # 名前を付けて保存：今の PDF と同じ名前は断り、別の名前で新しい文書として保存する
-    warned = []
-    monkeypatch.setattr(messagebox, "showwarning", lambda *a, **k: warned.append(a[1]))
-    second = tmp_path / "準備書面（２）.pdf"
-    answers = iter([str(first), str(second)])
-    monkeypatch.setattr(file_ops.filedialog, "asksaveasfilename", lambda **k: next(answers))
-    window.text.tag_add("changed", "1.0", "2.0")
-    assert window.on_save_as()
-    second_id = window.session.doc_id
-    assert warned and "同じ名前" in warned[0]
-    assert window.session.doc_id != old_id and window.session.version == 1 and window.session.pdf_path == second
-    assert read_id(str(first)) == (old_id, 1) and old_vadm.read_bytes() == old_raw
-    assert read_id(str(second)) == (window.session.doc_id, 1)
-    assert not window.text.tag_ranges("changed")              # 前の文書の AI の印は引き継がない
-    assert "新しい文書として保存しました" in str(window.status.cget("text"))
-    assert window.bind("<F12>")
-    # コピーとして開く：開いたファイルには書かず、初めて保存するときに保存先を尋ねる
-    monkeypatch.setattr(file_ops.filedialog, "askopenfilename", lambda **k: str(first))
-    window.on_open_copy()
-    s = window.session
-    assert s.doc_id not in (old_id, second_id) and s.version == 0 and s.pdf_path is None
-    assert window.raw_text() == PSEUDO.rstrip("\n") and window.tree.get_children() == ("〔人名Ａ〕",)
-    assert not s.is_modified(window.real_text())              # 開いただけでは尋ねない
-    assert str(window.pdf_name_label.cget("text")) == "書式付き（PDF）ファイル：（保存していません）"
-    assert "コピーとして開きました" in str(window.status.cget("text"))
-    window.text.insert("end", "追記。\n")
-    third = tmp_path / "準備書面（３）.pdf"
-    monkeypatch.setattr(file_ops.filedialog, "asksaveasfilename", lambda **k: str(third))
-    assert window.on_save()
-    assert read_id(str(third)) == (s.doc_id, 1) and read_id(str(first)) == (old_id, 1)
-    assert old_vadm.read_bytes() == old_raw
+def test_no_commands_for_reusing_documents(window):
+    """過去の文書を使い回す［コピーとして開く］［名前を付けて保存］（F12）と、［すべて解除］は置かない
+    （2026-10-25 班長決定。仕様.md の9.4）。"""
+    from tkinter import ttk
+
+    def texts(w):
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Button):
+                yield str(c.cget("text")).replace("\n", "")
+            yield from texts(c)
+    found = set(texts(window))
+    assert "開く" in found and "変更" in found and "解除" in found
+    assert not found & {"コピーとして開く", "名前を付けて保存", "すべて解除"}
+    assert not window.bind("<F12>")
+    assert not hasattr(window, "on_save_as") and not hasattr(window, "on_open_copy") and not hasattr(window, "on_unregister_all")
 
 
-def test_rename_unregister_all_and_released_check(window, tmp_path, monkeypatch):
-    """元の語を変える・すべて解除・解除した語の残りの確かめ（2026-10-25 班長指示）。"""
+def test_edit_entry_and_released_check(window, tmp_path, monkeypatch):
+    """一覧の［変更］：元の語を直す（記号はそのまま）・記号を変える。解除した語の残りの確かめ（2026-10-25 班長決定）。"""
     from types import SimpleNamespace
     # 元の語を変える：記号はそのまま、文章の中の記号がすべて新しい語になる。新しい語を打ってあれば記号にする
     window.text.insert("end", "丙川次郎の陳述書。\n")
     window.tree.selection_set("〔人名Ａ〕")
-    monkeypatch.setattr(ai_ops, "RenameDialog", lambda parent, e: SimpleNamespace(result="丙川次郎"))
-    window.on_rename()
+    monkeypatch.setattr(ai_ops, "EditDialog", lambda parent, e, d: SimpleNamespace(result=("丙川次郎", "人名", "Ａ")))
+    window.on_edit_entry()
     assert window.raw_text() == PSEUDO + "〔人名Ａ〕の陳述書。\n"
     assert window.real_text() == TEXT.replace("甲野太郎", "丙川次郎") + "丙川次郎の陳述書。\n"
     assert window.tree.item("〔人名Ａ〕", "values")[1] == "丙川次郎"
@@ -1348,11 +1325,66 @@ def test_rename_unregister_all_and_released_check(window, tmp_path, monkeypatch)
     n = len(asked)
     window.text.insert("end", "追記。\n")
     assert window.on_save() and len(asked) == n
-    # すべて解除：エディターの記号を元の語に戻し、一覧を空にする。エディターは Ctrl+Z 1回で戻る
-    before = window.raw_text()
-    window.on_unregister_all()
-    assert "〔" not in window.raw_text() and "丙川次郎の陳述書。" in window.raw_text()
-    assert not window.tree.get_children() and not window.session.dictionary.entries
-    assert window.session.released_in(window.real_text()) == {"丙川次郎": 3}
-    window.text.edit_undo()
-    assert window.raw_text() == before
+    # 記号を変える：エディターの記号も変わる。前の記号は、ほかの語に使い直さない
+    monkeypatch.setattr(ai_ops, "EditDialog", lambda parent, e, d: SimpleNamespace(result=("丙川次郎", "人名", "x")))
+    window.tree.selection_set("〔人名Ａ〕")
+    window.on_edit_entry()
+    assert "〔人名Ａ〕" not in window.raw_text() and "〔人名Ｘ〕の陳述書。" in window.raw_text()
+    assert window.tree.get_children() == ("〔人名Ｘ〕",) and "〔人名Ａ〕 から 〔人名Ｘ〕" in str(window.status.cget("text"))
+    assert window.session.dictionary.next_letters("人名") == "Ｂ"
+
+
+def test_register_dialog_requires_letters(window, monkeypatch):
+    """仮名化の画面：記号の字は自動で入れず、利用者が必ず打つ（英字・数字・漢字など。2026-10-25 班長決定・班長指示）。
+    今ほかの語に使っている記号・空・使えない字なら、理由を知らせて画面を閉じない。解除した記号を別の語に付けるときは
+    確かめる。この文書で使っている記号・解除した記号を示す。"""
+    from va_documake.dialogs import EditDialog, RegisterDialog
+    d = window.session.dictionary                     # 甲野太郎＝〔人名Ａ〕
+    d.register("丙川次郎", "人名", "B")
+    d.unregister("丙川次郎")
+    errors, asked, answers, seen = [], [], iter([False, True]), {}
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: errors.append(a[1]))
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(a[1]) or next(answers))
+
+    def run():
+        dlg = [c for c in window.winfo_children() if isinstance(c, RegisterDialog)][-1]
+        assert dlg.letters.get() == ""
+        seen["used"] = str(dlg.used_label.cget("text"))
+        dlg.ok()                                       # 空のまま
+        dlg.letters.set("a")
+        dlg.ok()                                       # 今使っている記号
+        dlg.letters.set("Ｘ Ｙ")
+        dlg.ok()                                       # 空白は使えない
+        dlg.letters.set("b")
+        dlg.ok()                                       # 解除した記号：確かめて［いいえ］
+        seen["after_no"] = dlg.winfo_exists()
+        dlg.letters.set("相手方1")
+        seen["preview"] = str(dlg.preview.cget("text"))
+        dlg.letters.set("b")
+        dlg.ok()                                       # 解除した記号：確かめて［はい］
+    window.after(200, run)
+    assert RegisterDialog(window, "丁野四郎", d).result == ("人名", "b")
+    assert "〔人名Ａ〕（甲野太郎）" in seen["used"] and "〔人名Ｂ〕（丙川次郎）" in seen["used"]
+    assert seen["preview"] == "記号：〔人名相手方１〕" and seen["after_no"]
+    assert len(errors) == 3 and "入れて" in errors[0] and "使っています" in errors[1] and "数字だけ" in errors[2]
+    assert len(asked) == 2 and "「丙川次郎」に使った記号" in asked[0]
+
+    def run_edit():
+        dlg = [c for c in window.winfo_children() if isinstance(c, EditDialog)][-1]
+        assert dlg.letters.get() == "Ａ" and dlg.word.get() == "甲野太郎"
+        assert "〔人名Ａ〕" not in str(dlg.used_label.cget("text"))      # 自分の記号は「使えない」に出さない
+        dlg.word.set("甲野太朗")
+        dlg.ok()
+    window.after(200, run_edit)
+    assert EditDialog(window, d.find("〔人名Ａ〕"), d).result == ("甲野太朗", "人名", "Ａ")
+    assert len(asked) == 2                              # 自分の記号のままなら確かめない
+    d.register("山田太郎", "人名", "yt")
+
+    def run_edit2():
+        dlg = [c for c in window.winfo_children() if isinstance(c, EditDialog)][-1]
+        seen["edit"] = dlg.letters.get()
+        dlg.cancel()
+    window.after(200, run_edit2)
+    assert EditDialog(window, d.find("〔人名ＹＴ〕"), d).result is None
+    assert seen["edit"] == "ＹＴ"                       # 2字以上の記号も、その字を入れて開く
+

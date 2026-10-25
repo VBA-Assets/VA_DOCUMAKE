@@ -314,3 +314,11 @@ def test_ai_marker_lines_are_dropped():
     r = vadm.review(c, "K7Q29XMD", 3, ["--: 以上", "<<<=", "本文に<?thinking_complete?>と書いた",
                                        "<?thinking_complete?> 字のある行"], make_dictionary())
     assert not r.changes and not r.changed_lines
+
+
+def test_prompt_says_tokens_are_per_document():
+    """AI への指示に、記号は文書ごとに振ることと、ほかの文書の記号を書き写さないことを書く（2026-10-25 班長決定）。
+    前の版の既定の指示の構文ファイルは、今の版の指示に替える。"""
+    assert "記号は文書ごとに振っている" in vadm.PROMPT
+    assert "ほかの文書の記号を、この文書にそのまま書き写さない" in vadm.PROMPT
+    assert "5549654a184b34dab55b7c4faa9c44f85bded7b18f299281195518b7f714f0e0" in vadm.PREVIOUS_PROMPTS
