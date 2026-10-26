@@ -13,7 +13,7 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 
-from . import vadm
+from . import vamd
 from .cleanup import clean_lines
 from .doctypes import DOC_TYPES, can_one_width, doc_type_for
 from .document import parse
@@ -45,21 +45,21 @@ class Session:
         self.new()
 
     def new(self):
-        self.doc_id = vadm.new_doc_id()
+        self.doc_id = vamd.new_doc_id()
         self.version = 0
-        self.settings = vadm.Settings(self.cfg.doc_type, self.cfg.page_number,
+        self.settings = vamd.Settings(self.cfg.doc_type, self.cfg.page_number,
                                       self.cfg.line_numbers and self.cfg.doc_type != NAIYOU,
                                       self.cfg.one_width and can_one_width(DOC_TYPES[self.cfg.doc_type]))
         self.dictionary = Dictionary()
         self.prompt = self.cfg.ai_prompt or None    # 利用者が直した AI への指示（None なら既定の指示。オプションで直す）
         self.pdf_path = None
-        self.vadm_file = None          # 開いた構文ファイル（None なら決まったフォルダの <文書ID>.vadm）
+        self.vamd_file = None          # 開いた構文ファイル（None なら決まったフォルダの <文書ID>.vamd）
         self.saved_text = None
         self.saved_body = None          # 保存した構文ファイルの文書（記号入り）
         self.saved_settings = None
         self._opened_body = None
         self.layout_map = None          # 最後に組んだ結果とエディターの位置の対応
-        self._vadm_stamp = None        # 最後に書いた・読んだ構文ファイルの中身の指紋（外での書き換えを見分ける）
+        self._vamd_stamp = None        # 最後に書いた・読んだ構文ファイルの中身の指紋（外での書き換えを見分ける）
         # 仮名化を解除した語・変える前の元の語（メモリの中だけ）。保存するとき、構文ファイルに実名のまま残って
         # いれば知らせる（2026-10-25 班長指示）
         self.released = {}
@@ -67,10 +67,10 @@ class Session:
     # ---------- 状態 ----------
 
     @property
-    def vadm_path(self):
-        if self.vadm_file is not None:
-            return self.vadm_file
-        return Path(self.cfg.vadm_folder) / vadm.file_name(self.doc_id)
+    def vamd_path(self):
+        if self.vamd_file is not None:
+            return self.vamd_file
+        return Path(self.cfg.vamd_folder) / vamd.file_name(self.doc_id)
 
     @property
     def doc_type(self):
@@ -132,16 +132,16 @@ class Session:
         """記号に置き換えた文書。"""
         return self.dictionary.pseudonymize(text)
 
-    def vadm_text(self, text, version=None):
-        return vadm.build(self.doc_id, self.version if version is None else version, self.settings,
+    def vamd_text(self, text, version=None):
+        return vamd.build(self.doc_id, self.version if version is None else version, self.settings,
                            self.body(text), self.prompt)
 
     def rewrite_prompt(self):
         """AI への指示を直したとき、保存してある構文ファイルの指示の部分だけを書き直す（版と文書は変えない。
         PDF と同じ版の文書のまま）。"""
-        if self.version and self.saved_text is not None and self.vadm_path.exists():
-            vadm.write_file(self.vadm_path, self.vadm_text(self.saved_text, self.version))
-            self._vadm_stamp = _stamp(self.vadm_path)
+        if self.version and self.saved_text is not None and self.vamd_path.exists():
+            vamd.write_file(self.vamd_path, self.vamd_text(self.saved_text, self.version))
+            self._vamd_stamp = _stamp(self.vamd_path)
 
     # ---------- 保存（仕様.md の9.1） ----------
 
@@ -152,8 +152,8 @@ class Session:
         ts, lines = self.typeset(text)
         write_pdf(ts, lines, str(pdf_path), self.doc_id, version, self.settings.page_number,
                   line_numbers=self.settings.line_numbers)
-        vadm.write_file(self.vadm_path, self.vadm_text(text, version))
-        self._vadm_stamp = _stamp(self.vadm_path)
+        vamd.write_file(self.vamd_path, self.vamd_text(text, version))
+        self._vamd_stamp = _stamp(self.vamd_path)
         self.version = version
         self.pdf_path = pdf_path
         self.saved_text = text
@@ -210,27 +210,27 @@ class Session:
 
     # ---------- 外での書き換え ----------
 
-    def vadm_changed_outside(self):
-        """構文ファイルが、最後に書いた・読んだときから、VA DocuMakeの外で書き換えられたか
+    def vamd_changed_outside(self):
+        """構文ファイルが、最後に書いた・読んだときから、VA Documentの外で書き換えられたか
         （テキストエディターで直した、AI の回答を上書き保存した、など。2026-10-23 班長了承）。"""
-        path = self.vadm_path
+        path = self.vamd_path
         if not path.exists():
             return False
-        return _stamp(path) != self._vadm_stamp
+        return _stamp(path) != self._vamd_stamp
 
-    def outside_vadm_text(self):
+    def outside_vamd_text(self):
         """外で書き換えられた構文ファイルの中身。"""
-        return self.vadm_path.read_bytes().decode("utf-8-sig", errors="replace")
+        return self.vamd_path.read_bytes().decode("utf-8-sig", errors="replace")
 
     def outside_stamp(self):
-        return _stamp(self.vadm_path) if self.vadm_path.exists() else None
+        return _stamp(self.vamd_path) if self.vamd_path.exists() else None
 
     # ---------- AI の回答の取り込み（仕様.md の8.3） ----------
 
     def review_answer(self, answer_text, current_text):
         """AI の回答を読み、今の文章と比べる。(Content, Review) を返す（文書ID 違い・区切りの行なしは例外）。"""
-        content = vadm.parse_text(answer_text)
-        r = vadm.review(content, self.doc_id, self.version, self.body(current_text).splitlines(), self.dictionary)
+        content = vamd.parse_text(answer_text)
+        r = vamd.review(content, self.doc_id, self.version, self.body(current_text).splitlines(), self.dictionary)
         return content, r
 
     def apply_answer(self, content, current_text):
@@ -258,12 +258,12 @@ class Session:
                     best = (p, pid[1])
         return best[0] if best else None
 
-    def open_vadm(self, path, pdf_path=None):
+    def open_vamd(self, path, pdf_path=None):
         """構文ファイルを開く。pdf_path が None なら探し、False なら PDF なしで開く（記号は利用者に尋ねる）。
 
         PDF が見つからないときは FileNotFoundError を出す（画面で利用者に PDF を選んでもらう）。
         """
-        content = vadm.read_file(path)
+        content = vamd.read_file(path)
         if pdf_path is None:
             pdf_path = self.find_pdf(content.doc_id)
             if pdf_path is None:
@@ -287,11 +287,11 @@ class Session:
         self.version = max(content.version, pdf_version)
         if content.settings is not None:
             self.settings = content.settings
-        self.prompt = None if content.prompt is None or vadm.is_default_prompt(content.prompt) else content.prompt
+        self.prompt = None if content.prompt is None or vamd.is_default_prompt(content.prompt) else content.prompt
         self.dictionary = d
         self.pdf_path = Path(pdf_path) if pdf_path else None
-        self.vadm_file = Path(path)
-        self._vadm_stamp = _stamp(path)
+        self.vamd_file = Path(path)
+        self._vamd_stamp = _stamp(path)
         self._opened_body = content.body_text
         text = d.restore(content.body_text)[0]
         if pdf_path and r.exact and pdf_version == content.version:
@@ -309,23 +309,23 @@ class Session:
         return self.dictionary.restore(self._opened_body or "")[0]
 
     def open_pdf(self, path):
-        """PDF を開く。VA DocuMakeの PDF で構文ファイルが見つかれば、それを開く。
+        """PDF を開く。VA Documentの PDF で構文ファイルが見つかれば、それを開く。
 
         構文ファイルが見つからない PDF・ほかのソフトで作った PDF は、文字を取り出して素の文章にする
         （見出し・配置は戻さない）。
         """
         pid = read_id(str(path))
         if pid:
-            candidate = Path(self.cfg.vadm_folder) / vadm.file_name(pid[0])
+            candidate = Path(self.cfg.vamd_folder) / vamd.file_name(pid[0])
             if candidate.exists():
-                return self.open_vadm(candidate, path)
+                return self.open_vamd(candidate, path)
         text = pdf_plain_text(path)
         if not text.strip():
             # 字の層のない PDF（OCR していないスキャンなど）は、今の文書を消さずに知らせる（2026-10-24）
             raise NoTextInPdf("この PDF には、取り出せる字がありません（スキャンした画像だけで、OCR の字が入っていません）。\n"
                               "スキャンのソフトで OCR（ScanSnap なら「検索可能な PDF にする」）をしてから、もう一度開いてください。")
         self.new()
-        msg = ("この PDF の構文ファイルが見つかりません。" if pid else "VA DocuMakeで作った PDF ではありません。")
+        msg = ("この PDF の構文ファイルが見つかりません。" if pid else "VA Documentで作った PDF ではありません。")
         return OpenResult(text, None, [msg + "文字だけを取り出しました（見出し・配置は戻していません）。"])
 
     def open_text(self, path):

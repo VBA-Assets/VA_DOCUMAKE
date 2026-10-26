@@ -1,12 +1,12 @@
 """行番号（VA公用文と同じ：5行ごと、ページごとに 1 から、表の中の行は数えない。2026-10-24 班長指示）。"""
 import fitz
 
-from va_documake import vadm
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import parse
-from va_documake.layout import Typesetter
-from va_documake.pdfwriter import LINE_NUMBER_LAST_X, pdf_bytes
-from va_documake.recover import rebuild_dictionary
+from va_document import vamd
+from va_document.doctypes import DOC_TYPES
+from va_document.document import parse
+from va_document.layout import Typesetter
+from va_document.pdfwriter import LINE_NUMBER_LAST_X, pdf_bytes
+from va_document.recover import rebuild_dictionary
 
 DT = DOC_TYPES["Saiban"]
 
@@ -54,8 +54,8 @@ def test_numbers_restart_on_each_page_and_align_right():
 
 def test_rebuild_ignores_line_numbers(tmp_path):
     """行番号は本文の左の余白にあるので、構文ファイルと PDF の突き合わせに入れない。"""
-    from va_documake.pdfwriter import write_pdf
-    from va_documake.pseudonym import Dictionary
+    from va_document.pdfwriter import write_pdf
+    from va_document.pseudonym import Dictionary
     real = ["原告　甲野太郎"] + [f"甲野太郎の主張{k}は争う。" for k in range(12)]
     d = Dictionary()
     d.register("甲野太郎", "人名")
@@ -63,8 +63,8 @@ def test_rebuild_ignores_line_numbers(tmp_path):
     lines = ts.layout(parse(real, DT))
     pdf = tmp_path / "a.pdf"
     write_pdf(ts, lines, str(pdf), "K7Q29XMD", 1, line_numbers=True)
-    settings = vadm.Settings("Saiban", line_numbers=True)
-    content = vadm.parse_text(vadm.build("K7Q29XMD", 1, settings, d.pseudonymize("\n".join(real))))
+    settings = vamd.Settings("Saiban", line_numbers=True)
+    content = vamd.parse_text(vamd.build("K7Q29XMD", 1, settings, d.pseudonymize("\n".join(real))))
     rebuilt, r = rebuild_dictionary(content, pdf)
     assert r.exact and not r.missing
     assert rebuilt.restore(content.body_text)[0] == "\n".join(real)

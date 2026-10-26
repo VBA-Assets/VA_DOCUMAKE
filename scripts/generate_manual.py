@@ -1,6 +1,6 @@
-"""操作マニュアルの PDF（VA_DocuMake_操作マニュアル_VerNNN.pdf）を作る。
+"""操作マニュアルの PDF（VA_Document_操作マニュアル_VerNNN.pdf）を作る。
 
-元は docs/manual/VA_DocuMake_操作マニュアル.md（編集用の Markdown）。VA mints の generate_manual.py と同じ作りで、
+元は docs/manual/VA_Document_操作マニュアル.md（編集用の Markdown）。VA mints の generate_manual.py と同じ作りで、
 Markdown の一部（見出し・段落・箇条書き〔入れ子も〕・番号付きの箇条書き・表・コードブロック・引用・`code`・
 **太字**・先頭のフロントマター）を読み、reportlab で PDF にする。PDF は作ったもの（ビルドの生成物）なので
 リポジトリには入れず、Markdown とこのスクリプトから作り直す。
@@ -8,7 +8,7 @@ Markdown の一部（見出し・段落・箇条書き〔入れ子も〕・番�
 実行のしかた：
     python scripts\\generate_manual.py
 
-出力：docs/manual/VA_DocuMake_操作マニュアル_<版>.pdf（<版> はフロントマターの version から「.」を除いたもの。
+出力：docs/manual/VA_Document_操作マニュアル_<版>.pdf（<版> はフロントマターの version から「.」を除いたもの。
 例：Ver100）
 
 書体は Windows の游ゴシック（本文）と Consolas（等幅）を埋め込む。`code` の中の日本語は、Consolas に字がないので、
@@ -43,7 +43,7 @@ from reportlab.platypus import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "docs" / "manual" / "VA_DocuMake_操作マニュアル.md"
+SOURCE = ROOT / "docs" / "manual" / "VA_Document_操作マニュアル.md"
 OUTPUT_DIR = ROOT / "docs" / "manual"
 
 # 画面（theme.py）と同じアクセントの青。見出しの左の縦の線などに使う
@@ -337,7 +337,7 @@ def build() -> Path:
             story.append(Paragraph(_inline(" ".join(block)), styles["body"]))
 
     version_slug = meta.get("version", "Ver.000").replace(".", "").replace(" ", "")
-    output = OUTPUT_DIR / f"VA_DocuMake_操作マニュアル_{version_slug}.pdf"
+    output = OUTPUT_DIR / f"VA_Document_操作マニュアル_{version_slug}.pdf"
 
     def _page_number(canvas, _doc) -> None:
         canvas.setFont(_FONT_REGULAR, 9)

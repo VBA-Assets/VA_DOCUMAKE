@@ -1,5 +1,5 @@
 """貼り付けた文章の整形（VA公用文 clsPreFormatter と同じ。仕様.md の5.1）。"""
-from va_documake.cleanup import clean
+from va_document.cleanup import clean
 
 
 def test_front_matter_removed():

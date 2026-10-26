@@ -5,10 +5,10 @@
 """
 import fitz
 
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import BODY, parse, parse_table
-from va_documake.layout import CELL_PAD_X, Typesetter
-from va_documake.pdfwriter import write_pdf
+from va_document.doctypes import DOC_TYPES
+from va_document.document import BODY, parse, parse_table
+from va_document.layout import CELL_PAD_X, Typesetter
+from va_document.pdfwriter import write_pdf
 
 SAIBAN = DOC_TYPES["Saiban"]
 

@@ -1,7 +1,7 @@
-"""仮名化（仕様.md の7。VA仮名化と同じ決まり＋VA DocuMakeの違い）。"""
+"""仮名化（仕様.md の7。VA仮名化と同じ決まり＋VA Documentの違い）。"""
 import pytest
 
-from va_documake.pseudonym import Dictionary, NotRegistrable, number_to_letters, overlaps_token, tokens_in
+from va_document.pseudonym import Dictionary, NotRegistrable, number_to_letters, overlaps_token, tokens_in
 
 
 def test_letters():

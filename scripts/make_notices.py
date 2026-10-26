@@ -1,4 +1,4 @@
-"""VA DocuMake が使っている部品のライセンスの表示（THIRD_PARTY_NOTICES.txt）を作る。
+"""VA Document が使っている部品のライセンスの表示（THIRD_PARTY_NOTICES.txt）を作る。
 
 exe に入る部品（Python・Tcl/Tk・PyMuPDF・ReportLab・fontTools・Pillow・PyInstaller のブートローダー）と、
 ボタンのアイコン（Fluent UI System Icons）のライセンスの全文を、いま入っている部品のファイルから集める。
@@ -31,7 +31,7 @@ COMPONENTS = [
     ("PyInstaller", "pyinstaller", "実行ファイルの作成（ブートローダーが exe に入る）",
      "GNU General Public License 第2版以降（ブートローダーの例外条項付き）", ["licenses/COPYING.txt"]),
     ("Fluent UI System Icons", None, "ボタンのアイコン（［傍点］のアイコンを除く）", "MIT License",
-     [ROOT / "src" / "va_documake" / "icons" / "LICENSE"]),
+     [ROOT / "src" / "va_document" / "icons" / "LICENSE"]),
     ("IPAフォント（IPA明朝・IPAゴシック）Ver.003.03", None,
      "Mac など、ＭＳ 明朝のない PC で PDF に埋め込む書体（ソースの assets/fonts に同梱。exe には入らない）",
      "IPAフォントライセンス v1.0", [ROOT / "assets" / "fonts" / "IPA_Font_License_Agreement_v1.0.txt"]),
@@ -54,10 +54,10 @@ def _license_files(dist: str | None, files: list) -> list[tuple[str, str]]:
 
 def build() -> Path:
     parts = [
-        "VA DocuMake が使っている部品のライセンスの表示",
+        "VA Document が使っている部品のライセンスの表示",
         "",
-        "VA DocuMake そのものは、GNU Affero General Public License 第3版（AGPL-3.0）で公開しています（LICENSE）。",
-        "VA DocuMake の実行ファイル（VA_DocuMake.exe）には、次の部品が入っています（IPAフォントは、ソースにだけ入っています）。",
+        "VA Document そのものは、GNU Affero General Public License 第3版（AGPL-3.0）で公開しています（LICENSE）。",
+        "VA Document の実行ファイル（VA_Document.exe）には、次の部品が入っています（IPAフォントは、ソースにだけ入っています）。",
         "ＭＳ 明朝・ＭＳ ゴシックは入っていません（Windows に入っているものを、埋め込みの許可の範囲で PDF に埋め込みます）。",
         "",
     ]
@@ -65,7 +65,7 @@ def build() -> Path:
         version = sys.version.split()[0] if name == "Python" else (metadata.version(dist) if dist else "")
         parts += ["=" * 78, f"{name} {version}".rstrip(), f"用途：{use}", f"ライセンス：{lic}"]
         if name == "PyMuPDF":
-            parts.append("ライセンスの全文は、VA DocuMake の LICENSE（AGPL-3.0）と同じです。"
+            parts.append("ライセンスの全文は、VA Document の LICENSE（AGPL-3.0）と同じです。"
                          "PyMuPDF の表示：" + (Path(metadata.distribution(dist).locate_file(
                              f"{dist}-{version}.dist-info/COPYING")).read_text(encoding="utf-8").strip()))
         parts.append("=" * 78)

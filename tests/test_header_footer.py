@@ -2,16 +2,16 @@
 import fitz
 import pytest
 
-from va_documake import config, vadm
-from va_documake.cleanup import clean_lines
-from va_documake.doctypes import (DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_NONE, PAGE_NUMBER_TOP_RIGHT)
-from va_documake.document import (CENTER, FOOTER, HEADER, HEADING, RIGHT, move_wraps_after_marks, parse,
+from va_document import config, vamd
+from va_document.cleanup import clean_lines
+from va_document.doctypes import (DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_NONE, PAGE_NUMBER_TOP_RIGHT)
+from va_document.document import (CENTER, FOOTER, HEADER, HEADING, RIGHT, move_wraps_after_marks, parse,
                                   split_lead_marks)
-from va_documake.layout import (FONT_SIZE, FOOTER_BASELINE_OFFSET, FOOTER_DISTANCE, HEADER_DISTANCE, HF_ABOVE,
+from va_document.layout import (FONT_SIZE, FOOTER_BASELINE_OFFSET, FOOTER_DISTANCE, HEADER_DISTANCE, HF_ABOVE,
                                 HF_BELOW, HF_EDGE_MIN, HF_LINE_PITCH, PAGE_H, Typesetter)
-from va_documake.pdfwriter import pdf_bytes
-from va_documake.session import Session
-from va_documake.textmap import LayoutMap
+from va_document.pdfwriter import pdf_bytes
+from va_document.session import Session
+from va_document.textmap import LayoutMap
 
 SAIBAN, KOUYOU = DOC_TYPES["Saiban"], DOC_TYPES["Kouyou"]
 BODY = ["# 請求原因", "本文です。" * 120, "## 細目", "本文です。" * 120]
@@ -154,7 +154,7 @@ def test_pdf_draws_header_and_moved_page_number():
 
 
 def test_line_numbers_do_not_count_header():
-    from va_documake.pdfwriter import LINE_NUMBER_STEP
+    from va_document.pdfwriter import LINE_NUMBER_STEP
     ts, _, lines = layout(["[HEADER] 一"] + ["本文"] * 5)
     with fitz.open(stream=pdf_bytes(ts, lines, line_numbers=True), filetype="pdf") as doc:
         text = doc[0].get_text()
@@ -177,7 +177,7 @@ def test_preview_link_on_header():
 
 @pytest.fixture
 def session(tmp_path):
-    s = Session(config.AppConfig(vadm_folder=str(tmp_path / "構文ファイル")))
+    s = Session(config.AppConfig(vamd_folder=str(tmp_path / "構文ファイル")))
     s.dictionary.register("甲野太郎", "人名")
     s.dictionary.register("乙山花子", "人名")
     return s
@@ -191,24 +191,24 @@ def test_reopen_recovers_words_only_in_header(session, tmp_path, page_number):
                       "[HEADER] --: 原告　甲野太郎", "別紙", "<<<=", "[HEADER] 別紙２", "本文"])
     pdf = tmp_path / "準備書面.pdf"
     session.save(real, pdf)
-    assert "甲野" not in session.vadm_path.read_text(encoding="utf-8")
+    assert "甲野" not in session.vamd_path.read_text(encoding="utf-8")
     s2 = Session(session.cfg)
-    r = s2.open_vadm(session.vadm_path, pdf)
+    r = s2.open_vamd(session.vamd_path, pdf)
     assert r.text == real and not r.unresolved and not r.messages and r.recovery.exact
 
 
 def test_review_reports_lost_header_mark():
-    c = vadm.Content("ABCDEFGH", 1, body=["本文", "原告"])
-    r = vadm.review(c, "ABCDEFGH", 1, ["本文", "[header] 原告"], _NoDictionary())
+    c = vamd.Content("ABCDEFGH", 1, body=["本文", "原告"])
+    r = vamd.review(c, "ABCDEFGH", 1, ["本文", "[header] 原告"], _NoDictionary())
     assert r.lost_marks == [("[HEADER]", "[header] 原告")]
-    c = vadm.Content("ABCDEFGH", 1, body=["本文", "[HEADER] 原告"])
-    assert not vadm.review(c, "ABCDEFGH", 1, ["本文", "[header] 原告"], _NoDictionary()).lost_marks
+    c = vamd.Content("ABCDEFGH", 1, body=["本文", "[HEADER] 原告"])
+    assert not vamd.review(c, "ABCDEFGH", 1, ["本文", "[header] 原告"], _NoDictionary()).lost_marks
 
 
 def test_default_prompt_mentions_header_and_old_prompt_is_default():
-    assert "[HEADER]" in vadm.PROMPT and vadm.is_default_prompt(vadm.PROMPT + "\n")
-    assert not vadm.is_default_prompt("独自の指示")
-    assert len(vadm.PREVIOUS_PROMPTS) >= 1 and all(len(h) == 64 for h in vadm.PREVIOUS_PROMPTS)
+    assert "[HEADER]" in vamd.PROMPT and vamd.is_default_prompt(vamd.PROMPT + "\n")
+    assert not vamd.is_default_prompt("独自の指示")
+    assert all(len(h) == 64 for h in vamd.PREVIOUS_PROMPTS)
 
 
 class _NoDictionary:

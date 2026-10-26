@@ -7,12 +7,19 @@ from tkinter import filedialog, messagebox
 
 import fitz  # PyMuPDF
 
-from . import APP_NAME, config, naiyou, printing, vadm
+from . import APP_NAME, config, naiyou, printing, vamd
 from .dialogs import ChangedOutsideDialog, MissingDialog, NaiyouDialog, PrintDialog
 from .doctypes import PAGE_NUMBER_LABELS, PAGE_NUMBER_NONE
 from .pdfwriter import FontNotEmbeddable
 from .pseudonym import TOKEN_RE
 from .recover import PdfMismatch
+
+# ［開く］の画面のファイルの種類。最初のものが既定。開けるものをまとめて出し、Word・Excel など開けないファイル
+# （テキストとして読むと文字化けする）は出さない（2026-10-27 班長決定。「すべてのファイル」を既定にする案と比べた）
+OPEN_FILETYPES = [
+    ("開けるファイル（構文ファイル・書式付きファイル・テキスト・マークダウン）", f"*{vamd.EXTENSION} *.pdf *.txt *.md"),
+    ("VA Document（構文ファイル・書式付きファイル）", f"*{vamd.EXTENSION} *.pdf"), ("テキスト・マークダウン", "*.txt *.md"),
+    ("すべてのファイル", "*.*")]
 
 
 class FileMixin:
@@ -21,22 +28,20 @@ class FileMixin:
     def on_open(self):
         if not self._confirm_discard():
             return
-        path = filedialog.askopenfilename(parent=self, title="開く", filetypes=[
-            ("VA DocuMake（構文ファイル・書式付きファイル）", "*.vadm *.pdf"), ("テキスト・マークダウン", "*.txt *.md"),
-            ("すべてのファイル", "*.*")])
+        path = filedialog.askopenfilename(parent=self, title="開く", filetypes=OPEN_FILETYPES)
         if path:
             self.open_path(Path(path))
 
     def open_path(self, path):
         try:
             suffix = path.suffix.lower()
-            if suffix == vadm.EXTENSION:
-                result = self._open_vadm(path)
+            if suffix == vamd.EXTENSION:
+                result = self._open_vamd(path)
             elif suffix == ".pdf":
                 result = self.session.open_pdf(path)
             else:
                 result = self.session.open_text(path)
-        except vadm.NoSeparator as e:
+        except vamd.NoSeparator as e:
             messagebox.showerror(APP_NAME, f"構文ファイルとして読めません。\n{e}", parent=self)
             return
         except (PdfMismatch, OSError, ValueError) as e:
@@ -54,9 +59,9 @@ class FileMixin:
             messagebox.showinfo(APP_NAME, m, parent=self)
         self.status.configure(text=f"開きました：{path.name}")
 
-    def _open_vadm(self, path):
+    def _open_vamd(self, path):
         try:
-            return self.session.open_vadm(path)
+            return self.session.open_vamd(path)
         except FileNotFoundError:
             pass
         choice = messagebox.askyesnocancel(
@@ -68,8 +73,8 @@ class FileMixin:
             pdf = filedialog.askopenfilename(parent=self, title="PDF を選ぶ", filetypes=[("PDF", "*.pdf")])
             if not pdf:
                 return None
-            return self.session.open_vadm(path, Path(pdf))
-        return self.session.open_vadm(path, False)
+            return self.session.open_vamd(path, Path(pdf))
+        return self.session.open_vamd(path, False)
 
     def _confirm_discard(self):
         """保存していない変更があれば、保存するかを尋ねる。続けてよければ True。"""
@@ -82,7 +87,7 @@ class FileMixin:
         return self.on_save() if answer else True
 
     def on_close_document(self):
-        """今の文書を閉じて、新しい文書にする（Word の「閉じる」。VA DocuMake は終わらない。2026-10-24 班長指示）。
+        """今の文書を閉じて、新しい文書にする（Word の「閉じる」。VA Document は終わらない。2026-10-24 班長指示）。
         保存していない変更があれば尋ねる。仮名化した語の一覧（実名と記号の対応）があれば、消えることを確かめる。"""
         if not self._confirm_discard():
             return False
@@ -106,7 +111,7 @@ class FileMixin:
         （構文ファイルに書く中身の確認）は出さない（2026-10-24 班長決定）。
         """
         text = self.real_text()
-        if check_outside and self.session.vadm_changed_outside():
+        if check_outside and self.session.vamd_changed_outside():
             choice = ChangedOutsideDialog(self, at_save=True).result
             if choice is None:
                 return False
@@ -136,7 +141,7 @@ class FileMixin:
         config.save(self.cfg)
         self._update_title()
         self.status.configure(text=f"版 {self.session.version} を保存しました。書式付き（PDF）：{self.session.pdf_path.name}　"
-                                   f"構文（VADM）：{self.session.vadm_path.name}")
+                                   f"構文（VAMD）：{self.session.vamd_path.name}")
         return True
 
     def _check_released(self, text):
@@ -191,8 +196,8 @@ class FileMixin:
         があれば、PDF に記号のまま出ることを知らせて、保存するかを尋ねる（仮名化した語の記号は、実名に戻してある）。
         返すのは保存する文章（やめたら None）。allow_unknown なら尋ねない（AI の回答の取り込みで、すでに知らせているため）。
         """
-        if any(vadm.SEPARATOR_RE.match(ln) for ln in text.splitlines()):
-            messagebox.showerror(APP_NAME, "実名の文章の中に、構文ファイルの区切りの行（==== VA DocuMake …）があります。"
+        if any(vamd.SEPARATOR_RE.match(ln) for ln in text.splitlines()):
+            messagebox.showerror(APP_NAME, "実名の文章の中に、構文ファイルの区切りの行（==== VA Document …）があります。"
                                  "仮名の文章が紛れ込んでいるおそれがあるため、保存しません。\n\n"
                                  "AI の回答を Ctrl+V で貼り付けた場合は、Ctrl+Z で貼り付ける前に戻してから、"
                                  "「AI 連携」の［貼り付け］で取り込んでください（区切りの行を外し、文書ID と版を確かめ、"
@@ -217,7 +222,7 @@ class FileMixin:
             if not path:
                 return None
             path = Path(path)
-            if path.parent.resolve() == Path(self.cfg.vadm_folder).resolve():
+            if path.parent.resolve() == Path(self.cfg.vamd_folder).resolve():
                 messagebox.showwarning(APP_NAME, "構文ファイルのフォルダには、書式付きファイル（PDF。実名入り）を保存しないでください。"
                                        "AI がフォルダの中を読むと、実名の PDF に届いてしまいます。", parent=self)
                 continue
@@ -229,7 +234,7 @@ class FileMixin:
         印刷できた）。保存をやめたら印刷しない。"""
         if not printing.available():
             # Windows だけ（Mac などでは［印刷］を押せない。Ctrl+P も効かせない）。保存した PDF を、PDF のソフトで印刷する
-            messagebox.showinfo(APP_NAME, "この PC では、VA DocuMake から印刷できません。保存した PDF を開いて印刷してください。",
+            messagebox.showinfo(APP_NAME, "この PC では、VA Document から印刷できません。保存した PDF を開いて印刷してください。",
                                 parent=self)
             return
         text = self.real_text()
@@ -249,7 +254,7 @@ class FileMixin:
             return
         with fitz.open(stream=data, filetype="pdf") as doc:
             pages = len(doc)
-        # VA DocuMake の「印刷」画面で選ぶ（2026-10-24 班長決定。Windows の新しい印刷画面の紛らわしい知らせを避ける）
+        # VA Document の「印刷」画面で選ぶ（2026-10-24 班長決定。Windows の新しい印刷画面の紛らわしい知らせを避ける）
         choice = PrintDialog(self, pages, self._preview_page + 1, printing.printers(),
                              self._last_printer or printing.default_printer(), printing.show_properties).result
         if choice is None:
@@ -267,7 +272,7 @@ class FileMixin:
             self.update_idletasks()
         self.configure(cursor="watch")
         try:
-            # 印刷の文書の名前は、Word と同じく PDF のファイル名（保存していなければ「VA DocuMake」）。
+            # 印刷の文書の名前は、Word と同じく PDF のファイル名（保存していなければ「VA Document」）。
             # 2026-10-23 班長決定（文書ID にしていたが、Microsoft Print to PDF で作った PDF の題名にもなるため改めた）
             name = self.session.pdf_path.stem if self.session.pdf_path else APP_NAME
             n = printing.print_pdf(data, hdc, name, page_list, progress=progress)

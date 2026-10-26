@@ -3,14 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from va_documake import config
-from va_documake.session import Session
+from va_document import config
+from va_document.session import Session
 
 DATA = Path(__file__).parent / "data"
 
 
 def session_for(text, doc_type="Saiban"):
-    s = Session(config.AppConfig(vadm_folder="未使用", doc_type=doc_type))
+    s = Session(config.AppConfig(vamd_folder="未使用", doc_type=doc_type))
     s.typeset(text)
     return s.layout_map
 

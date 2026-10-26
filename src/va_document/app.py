@@ -1,4 +1,4 @@
-"""VA DocuMakeの画面（tkinter・ttk。仕様.md の4）。
+"""VA Documentの画面（tkinter・ttk。仕様.md の4）。
 
 ・画面のまとめ役。部品（mixin）を混ぜて使う：エディターの操作（editor_ops.py）、確認表示（preview.py）、
   ファイルの操作（file_ops.py：開く・保存・閉じる・印刷）、AI 連携（ai_ops.py：仮名化・コピー・取り込み）。
@@ -14,7 +14,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from . import APP_NAME, __version__, config, ime, naiyou, printing, theme, tooltip, vadm
+from . import APP_NAME, __version__, config, ime, naiyou, printing, theme, tooltip, vamd
 from .ai_ops import AiMixin
 from .doctypes import DOC_TYPES, PAGE_NUMBER_LABELS, can_one_width
 from .document import (BULLET_MARK, CENTER_MARK, HEADER_MARK, HEADING_BUTTON_MARK, INDENT_MARK, NUMBER_MARK,
@@ -73,12 +73,12 @@ def _icon_photos(path):
 
 
 def window_icon_path():
-    """アイコン（assets/VA_DocuMake.ico）の場所。exe（PyInstaller）では展開先に入れたもの（VA mints と同じ）。"""
+    """アイコン（assets/VA_Document.ico）の場所。exe（PyInstaller）では展開先に入れたもの（VA mints と同じ）。"""
     if getattr(sys, "frozen", False):
         base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
     else:
         base = Path(__file__).resolve().parents[2]
-    return base / "assets" / "VA_DocuMake.ico"
+    return base / "assets" / "VA_Document.ico"
 
 
 class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
@@ -269,7 +269,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # ［保存］は、いつも同じ見た目にする（保存していない変更があるときの青い枠は、2026-10-26 に外した。班長決定。
         # 保存していない変更は題の「＊」で示し、閉じる・開く・印刷・コピーの前に保存する〔尋ねる〕）
         self.save_button = g.small("保存", self.on_save, "save")
-        # ［閉じる］は今の文書を閉じて新しい文書にする（VA DocuMake は終わらない）。［オプション］は構文ファイルの
+        # ［閉じる］は今の文書を閉じて新しい文書にする（VA Document は終わらない）。［オプション］は構文ファイルの
         # 保存場所とエディターの見た目（2026-10-24 班長指示）
         g.small("閉じる", self.on_close_document, "document_dismiss")
         # 過去の文書を使い回す［コピーとして開く］［名前を付けて保存］は置かない（2026-10-25 班長決定。仕様.md の9.4）
@@ -278,7 +278,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # ［選択範囲を仮名化］は大きいボタン、［コピー］［貼り付け］はその右に積む小さいボタンにする（2026-10-24・25 班長指示）
         g = rb.group("AI 連携")
         self.register_button = g.large("選択範囲を\n仮名化", self.on_register, "person_lock")
-        g.small("コピー", self.on_copy_vadm, "copy")
+        g.small("コピー", self.on_copy_vamd, "copy")
         g.small("貼り付け", self.on_import, "clipboard_paste")
         # 文書の種類・ページ番号の選択欄と［見出し］［箇条書き］［段落番号］は「スタイル」の組、［太字］から右は「書式」の
         # 組にする（2026-10-25 班長指示。それまでは1つの「書式」の組）。選択欄の左端をそろえる。［左］は置かない。
@@ -460,7 +460,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         doc_type = labels[self.doc_type_box.get()]
         line_numbers = self.line_numbers_var.get() and doc_type != naiyou.DOC_TYPE     # 内容証明には付けない
         one_width = self.one_width_var.get() and can_one_width(DOC_TYPES[doc_type])
-        self.session.settings = vadm.Settings(doc_type, pages[self.page_number_box.get()], line_numbers, one_width)
+        self.session.settings = vamd.Settings(doc_type, pages[self.page_number_box.get()], line_numbers, one_width)
         self._sync_settings_boxes()
         # 次に起動したときの新しい文書も、この設定で始める（2026-10-23 班長指示）
         s = self.session.settings
@@ -535,23 +535,23 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
     def on_options(self):
         """オプション（構文ファイルの保存場所、エディターの書体・字の大きさ・行の間隔。2026-10-24 班長指示）。"""
         dlg = OptionsDialog(self, self.cfg, theme.editor_font_choices(self), config.FONT_SIZE_RANGE,
-                            config.LINE_SPACING_RANGE, self.session.prompt or vadm.PROMPT, vadm.PROMPT)
+                            config.LINE_SPACING_RANGE, self.session.prompt or vamd.PROMPT, vamd.PROMPT)
         r = dlg.result
         if r is None:
             return
-        old_folder = Path(self.cfg.vadm_folder)
-        if Path(r["vadm_folder"]).resolve() != old_folder.resolve():
+        old_folder = Path(self.cfg.vamd_folder)
+        if Path(r["vamd_folder"]).resolve() != old_folder.resolve():
             # 今の文書は、これまでの場所の構文ファイルを使い続ける（新しい文書から、新しい場所に保存する）
-            current = old_folder / vadm.file_name(self.session.doc_id)
-            if self.session.vadm_file is None and current.exists():
-                self.session.vadm_file = current
-            self.cfg.vadm_folder = r["vadm_folder"]
+            current = old_folder / vamd.file_name(self.session.doc_id)
+            if self.session.vamd_file is None and current.exists():
+                self.session.vamd_file = current
+            self.cfg.vamd_folder = r["vamd_folder"]
         self.cfg.editor_font_family = r["font_family"]
         self.cfg.editor_font_size = r["font_size"]
         self.cfg.editor_line_spacing_pt = r["line_spacing"]
         if r["prompt"] is not None:
             # AI への指示：今の文書と、これから作る文書に使う。保存してある構文ファイルの指示も書き直す
-            custom = None if vadm.is_default_prompt(r["prompt"]) else r["prompt"]
+            custom = None if vamd.is_default_prompt(r["prompt"]) else r["prompt"]
             self.session.prompt = custom
             self.cfg.ai_prompt = custom or ""
             self.session.rewrite_prompt()
@@ -586,7 +586,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
             modified = True
         self.title(f"{'＊' if modified else ''}{name} - {APP_NAME} {VERSION_LABEL}")
         # 確認表示の上に PDF、エディターの上に構文ファイルの名前と版を出す（2026-10-24 班長指示）。文書ID は
-        # 構文ファイルの名前（<文書ID>.vadm）。保存するまではどちらもないので、そう書く
+        # 構文ファイルの名前（<文書ID>.vamd）。保存するまではどちらもないので、そう書く
         s = self.session
         # 保存していない文書は、エディターが空なら「開かれていません」（起動したとき・閉じた後）、書いていれば
         # 「保存していません」（2026-10-24 班長指摘）
@@ -594,12 +594,12 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.pdf_name_label.configure(text=f"書式付き（PDF）ファイル：{s.pdf_path.name}" if s.pdf_path and s.version else f"書式付き（PDF）ファイル：{none}")
         # 版は画面に出さない（PDF と構文ファイルの組を確かめる内部の仕組み。古い回答の知らせなどで、必要なときだけ出す。
         # 2026-10-24 班長指示）
-        self.doc_id_label.configure(text=f"構文（VADM）ファイル：{s.vadm_path.name}"
-                                    if s.version else f"構文（VADM）ファイル：{none}")
+        self.doc_id_label.configure(text=f"構文（VAMD）ファイル：{s.vamd_path.name}"
+                                    if s.version else f"構文（VAMD）ファイル：{none}")
         self.copy_path_button.configure(state="normal" if s.version else "disabled")
 
 
-APP_USER_MODEL_ID = "VBAAssets.VADocuMake.Source"
+APP_USER_MODEL_ID = "VBAAssets.VADocument.Source"
 
 
 def main():
@@ -610,7 +610,7 @@ def main():
         except Exception:
             pass
         if not getattr(sys, "frozen", False):
-            # python で起動したときも、タスクバーに VA DocuMakeのアイコンを出す（python.exe のウィンドウとして
+            # python で起動したときも、タスクバーに VA Documentのアイコンを出す（python.exe のウィンドウとして
             # まとめられないようにする。2026-10-23 班長了承）。exe では、埋め込んだアイコンを使うので付けない
             # （インストーラーのショートカットとピン留めの扱いがずれないように）
             try:

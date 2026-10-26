@@ -9,10 +9,10 @@ from pathlib import Path
 import fitz
 import pytest
 
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import parse
-from va_documake.layout import Typesetter
-from va_documake.pdfwriter import check_embeddable, read_id, write_pdf, MS_FONTS
+from va_document.doctypes import DOC_TYPES
+from va_document.document import parse
+from va_document.layout import Typesetter
+from va_document.pdfwriter import check_embeddable, read_id, write_pdf, MS_FONTS
 
 DATA = Path(__file__).parent / "data"
 
@@ -73,8 +73,18 @@ def test_id_survives_resave(saiban_pdf, tmp_path):
 
 
 def test_no_id_for_other_pdf():
-    """VA DocuMakeが作っていない PDF は、識別子なしと判別する。"""
+    """VA Documentが作っていない PDF は、識別子なしと判別する。"""
     assert read_id(str(DATA / "裁判所" / "VA公用文.pdf")) is None
+
+
+def test_no_id_for_va_documake_pdf(saiban_pdf, tmp_path):
+    """Ver160 まで（VA DocuMake）の PDF の識別子（VADM:）は読まない（2026-10-27 班長決定）。"""
+    old = tmp_path / "VA_DocuMake.pdf"
+    with fitz.open(saiban_pdf) as doc:
+        first = "VADM:K7Q29XMD:000003".encode("ascii").hex()
+        doc.xref_set_key(-1, "ID", f"[<{first}><{first}>]")
+        doc.save(old)
+    assert read_id(str(old)) is None
 
 
 def test_ms_mincho_is_embeddable():

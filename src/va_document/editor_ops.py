@@ -7,7 +7,7 @@ import math
 import re
 import tkinter as tk
 
-from . import theme, vadm
+from . import theme, vamd
 from .document import (BULLET, BULLET_MARK, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN,
                        DISTRIBUTE_RE, HEADING, HEADING_BUTTON_MARK, HEADING_MARK_RE, INDENT_MARK, LEAD_ALIGN_MARKS,
                        LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, NUMBER_MARK, RIGHT_MARK, TABLE, area_of,
@@ -406,7 +406,7 @@ class EditorMixin:
         rows = []
         for n in range(first, last + 1):
             line = self.text.get(f"{n}.0", f"{n}.end")
-            if line.lstrip().startswith("|") or is_line_mark(line) or vadm.SEPARATOR_RE.match(line):
+            if line.lstrip().startswith("|") or is_line_mark(line) or vamd.SEPARATOR_RE.match(line):
                 continue
             rows.append((n, line, move_wraps_after_marks(line)))
         if not rows and not cells and not columns:
@@ -516,7 +516,7 @@ class EditorMixin:
         なくなるため）。Ctrl+Z 1回で戻せる。"""
         def target(line):
             if (not line.strip() or line.lstrip().startswith("|") or is_line_mark(line)
-                    or vadm.SEPARATOR_RE.match(line)):
+                    or vamd.SEPARATOR_RE.match(line)):
                 return None
             parts = split_lead_marks(move_wraps_after_marks(line))
             if not parts[1] and (HEADING_MARK_RE.match(parts[3]) or LIST_MARK_RE.match(parts[3])):
@@ -531,7 +531,7 @@ class EditorMixin:
         配置の記号・+N・-> は残す。表・改ページなどの記号の行・区切りの行と、見出し・箇条書き・段落番号の行には
         付けない（付けると見出しなどでなくなるため。［インデント］と同じ）。Ctrl+Z 1回で戻せる。"""
         def target(line):
-            if line.lstrip().startswith("|") or is_line_mark(line) or vadm.SEPARATOR_RE.match(line):
+            if line.lstrip().startswith("|") or is_line_mark(line) or vamd.SEPARATOR_RE.match(line):
                 return None
             parts = split_lead_marks(move_wraps_after_marks(line))
             if not (parts.area or parts.left or parts.first) and (
@@ -658,7 +658,7 @@ class EditorMixin:
     def on_plain(self):
         """標準の本文（左寄せ）にする（Word の Ctrl+Shift+N）。見出し・箇条書き・段落番号・配置の記号を外す。"""
         def change(line, n):
-            if line.lstrip().startswith("|") or is_line_mark(line) or vadm.SEPARATOR_RE.match(line):
+            if line.lstrip().startswith("|") or is_line_mark(line) or vamd.SEPARATOR_RE.match(line):
                 return None
             # 「**:-: # 見出し**」は「:-: # **見出し**」として扱う。配置・+N・-> の記号を外す（ヘッダー・フッターの
             # 記号は、置く場所の記号なので残す。Word の「標準」でも、ヘッダーの段落はヘッダーのまま）
@@ -749,7 +749,7 @@ def _special_line(line):
     """見出しのレベルを変えない行（表・改ページなどの記号の行・配置の記号の行・区切りの行・空の行）。"""
     s = line.strip()
     lead = split_lead_marks(move_wraps_after_marks(line))
-    return (not s or s.startswith("|") or is_line_mark(s) or vadm.SEPARATOR_RE.match(line)
+    return (not s or s.startswith("|") or is_line_mark(s) or vamd.SEPARATOR_RE.match(line)
             or bool(lead.align or lead.left or lead.first or lead.area))
 
 

@@ -1,7 +1,7 @@
 """均等割付（[原告]{5}。Word の均等割り付けと同じ。2026-10-24 班長指示）。"""
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import parse
-from va_documake.layout import Typesetter
+from va_document.doctypes import DOC_TYPES
+from va_document.document import parse
+from va_document.layout import Typesetter
 
 DT = DOC_TYPES["Saiban"]
 

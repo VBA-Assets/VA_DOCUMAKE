@@ -9,13 +9,13 @@ import fitz
 import pytest
 from fontTools.ttLib import TTFont
 
-from va_documake.cleanup import clean
-from va_documake.doctypes import (DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED,
+from va_document.cleanup import clean
+from va_document.doctypes import (DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED,
                                   PAGE_NUMBER_BOTTOM_RIGHT, PAGE_NUMBER_TOP_RIGHT)
-from va_documake.document import parse
-from va_documake.layout import Typesetter
-from va_documake import pdfwriter
-from va_documake.pdfwriter import IPA_FONTS, MS_FONTS, check_embeddable, pdf_bytes
+from va_document.document import parse
+from va_document.layout import Typesetter
+from va_document import pdfwriter
+from va_document.pdfwriter import IPA_FONTS, MS_FONTS, check_embeddable, pdf_bytes
 
 DATA = Path(__file__).parent / "data"
 

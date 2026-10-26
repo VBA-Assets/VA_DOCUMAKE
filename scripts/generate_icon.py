@@ -1,9 +1,9 @@
-"""実行ファイル・ウィンドウ用のアイコン（assets/VA_DocuMake.ico）を作るスクリプト。
+"""実行ファイル・ウィンドウ用のアイコン（assets/VA_Document.ico）を作るスクリプト。
 
 VA mints・VA FAX と同じ作り（角丸の四角に白い太字。角の丸み・左右の余白は同じ）にしたうえで、
 1行目に「VA」を小さく、2行目に「Docu」を大きく書き、背景は紫（#5C2D91。Microsoft の紫）にする
 （紫は 2026-10-23 班長決定。VA mints の青と見分けるため。字は 2026-10-24、名前を VA DocuMake に改めたときの班長決定。
-それまでは「VA 公用文」「AI」）。字は Segoe UI Bold。2行目は、左右の余白に収まるいちばん大きい字にする。
+それまでは「VA 公用文」「AI」。2026-10-27 に VA Document に改めた後も、Document の略として同じ字を使う）。字は Segoe UI Bold。2行目は、左右の余白に収まるいちばん大きい字にする。
 
 アイコンのファイルはリポジトリに入れ、作り方もコードとして残す（VA mints の scripts/generate_icon.py と同じ方針）。
 
@@ -15,7 +15,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
-ICON_PATH = ROOT / "assets" / "VA_DocuMake.ico"
+ICON_PATH = ROOT / "assets" / "VA_Document.ico"
 
 BACKGROUND = "#5C2D91"
 TEXT_COLOR = "#ffffff"

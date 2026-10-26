@@ -9,9 +9,9 @@ tk = pytest.importorskip("tkinter")
 
 from tkinter import messagebox  # noqa: E402
 
-from va_documake import ai_ops, app, config, editor_ops, file_ops, theme, vadm  # noqa: E402
-from va_documake.pdfwriter import read_id  # noqa: E402
-from va_documake.editor_ops import EDITOR_MARK_WATCH_MS  # noqa: E402
+from va_document import ai_ops, app, config, editor_ops, file_ops, theme, vamd  # noqa: E402
+from va_document.pdfwriter import read_id  # noqa: E402
+from va_document.editor_ops import EDITOR_MARK_WATCH_MS  # noqa: E402
 
 TEXT = "原告　甲野太郎\n:=: 準備書面（１）\n# 認否\n甲野太郎の主張は争う。\n"
 PSEUDO = TEXT.replace("甲野太郎", "〔人名Ａ〕")      # エディターは常に仮名（2026-10-24 班長決定）
@@ -21,7 +21,7 @@ PSEUDO = TEXT.replace("甲野太郎", "〔人名Ａ〕")      # エディター�
 def main_window():
     # Tk はモジュールで1つだけ作る（Windows の Python では、Tk を何度も作り直すと、まれに初期化に失敗する）
     try:
-        w = app.MainWindow(cfg=config.AppConfig(vadm_folder="未使用"))
+        w = app.MainWindow(cfg=config.AppConfig(vamd_folder="未使用"))
     except tk.TclError as e:
         pytest.skip(f"画面を表示できない環境（{e}）")
     w.withdraw()
@@ -34,7 +34,7 @@ def window(main_window, tmp_path, monkeypatch):
     # 班長の設定ファイル（%APPDATA%）には書かない
     monkeypatch.setattr(config, "config_path", lambda: tmp_path / "settings.json")
     w = main_window
-    w.cfg = config.AppConfig(vadm_folder=str(tmp_path / "構文ファイル"))
+    w.cfg = config.AppConfig(vamd_folder=str(tmp_path / "構文ファイル"))
     w.session = app.Session(w.cfg)
     w._load_text(TEXT)
     w.session.dictionary.register("甲野太郎", "人名")
@@ -147,24 +147,44 @@ def test_save_and_import(window, tmp_path, monkeypatch):
     window.session.pdf_path = tmp_path / "準備書面.pdf"
     assert window.on_save()
     assert read_id(str(tmp_path / "準備書面.pdf")) == (window.session.doc_id, 1)
-    assert window.session.vadm_path.exists()
+    assert window.session.vamd_path.exists()
     assert (tmp_path / "settings.json").exists()
     # ［貼り付け］：クリップボードの AI の回答を、確認の画面なしでエディターに取り込む
     # （班長のクリップボードを書き換えないよう、クリップボードの読み取りを差し替える）
-    body = vadm.read_file(window.session.vadm_path).body_text.replace("争う。", "否認する。")
-    answer = "直しました。\n```\n" + vadm.separator_line(window.session.doc_id, 1, window.session.settings) + "\n" + body + "\n```\n"
+    body = vamd.read_file(window.session.vamd_path).body_text.replace("争う。", "否認する。")
+    answer = "直しました。\n```\n" + vamd.separator_line(window.session.doc_id, 1, window.session.settings) + "\n" + body + "\n```\n"
     monkeypatch.setattr(window, "clipboard_get", lambda: answer)
     window.on_import()
     assert "〔人名Ａ〕の主張は否認する。" in window.raw_text()          # エディターは仮名のまま
     assert "甲野太郎の主張は否認する。" in window.real_text()
     assert window.session.version == 2
-    assert "否認する。" in window.session.vadm_path.read_text(encoding="utf-8")
+    assert "否認する。" in window.session.vamd_path.read_text(encoding="utf-8")
     # 変わった段落（4行目）だけに、右端の青い線の印が付く
     ranges = window.text.tag_ranges("changed")
     assert [str(x) for x in ranges] == ["4.0", "5.0"]
     # Ctrl+Z（エディターの元に戻す）1回で、貼り付ける前の文章に戻る
     window.text.edit_undo()
     assert window.raw_text() == PSEUDO
+
+
+def test_open_dialog_lists_all_openable_files_first(window, tmp_path, monkeypatch):
+    """［開く］の画面の既定のファイルの種類は、構文ファイル・PDF・テキスト・マークダウンをまとめた「開けるファイル」
+    （2026-10-27 班長決定）。選んだマークダウンは、そのまま開く。"""
+    md = tmp_path / "見本.md"
+    md.write_text("# 認否\n認める。\n", encoding="utf-8")
+    seen = {}
+
+    def ask(**kw):
+        seen.update(kw)
+        return str(md)
+    monkeypatch.setattr(file_ops.filedialog, "askopenfilename", ask)
+    monkeypatch.setattr(messagebox, "askyesnocancel", lambda *a, **k: False)   # 今の文書は保存しない
+    window.on_open()
+    first = seen["filetypes"][0]
+    assert first[0].startswith("開けるファイル")
+    assert set(first[1].split()) == {"*.vamd", "*.pdf", "*.txt", "*.md"}
+    assert ("すべてのファイル", "*.*") in seen["filetypes"]
+    assert window.text.get("1.0", "end-1c").rstrip("\n") == "# 認否\n認める。"
 
 
 def test_paste_rejects_other_document_and_plain_text(window, tmp_path, monkeypatch):
@@ -174,7 +194,7 @@ def test_paste_rejects_other_document_and_plain_text(window, tmp_path, monkeypat
     monkeypatch.setattr(window, "clipboard_get", lambda: "ふつうの文章")
     window.on_import()
     monkeypatch.setattr(window, "clipboard_get",
-                        lambda: "==== VA DocuMake 文書ID ZZZZZZZZ 版 1 ====\n# 認否\n認める。")
+                        lambda: "==== VA Document 文書ID ZZZZZZZZ 版 1 ====\n# 認否\n認める。")
     window.on_import()
     assert [k for k, _ in shown] == ["info", "error"] and "別の文書" in shown[1][1]
     assert window.raw_text() == PSEUDO        # どちらも、エディターは変わらない
@@ -185,7 +205,7 @@ def test_paste_warns_about_removed_paragraphs_and_tokens(window, tmp_path, monke
     assert window.on_save()
     warned = []
     monkeypatch.setattr(messagebox, "showwarning", lambda *a, **k: warned.append(a[1]))
-    sep = vadm.separator_line(window.session.doc_id, 1, window.session.settings)
+    sep = vamd.separator_line(window.session.doc_id, 1, window.session.settings)
     monkeypatch.setattr(window, "clipboard_get", lambda: sep + "\n原告　〔人名Ａ〕\n:=: 準備書面（１）\n# 認否\n")
     window.on_import()
     assert len(warned) == 1 and "消えた段落（1）" in warned[0] and "甲野太郎の主張は争う。" in warned[0]
@@ -196,7 +216,7 @@ def test_paste_drops_ai_marker_lines(window, tmp_path, monkeypatch):
     window.session.pdf_path = tmp_path / "準備書面.pdf"
     assert window.on_save()
     body = window.raw_text().rstrip("\n")
-    sep = vadm.separator_line(window.session.doc_id, 1, window.session.settings)
+    sep = vamd.separator_line(window.session.doc_id, 1, window.session.settings)
     monkeypatch.setattr(window, "clipboard_get", lambda: sep + "\n" + body + "\n<?thinking_complete?>\n")
     window.on_import()
     assert "<?thinking_complete?>" not in window.raw_text()
@@ -204,11 +224,11 @@ def test_paste_drops_ai_marker_lines(window, tmp_path, monkeypatch):
 
 
 def _change_outside(window, old, new):
-    path = window.session.vadm_path
+    path = window.session.vamd_path
     path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
 
 
-def test_save_asks_when_vadm_changed_outside(window, tmp_path, monkeypatch):
+def test_save_asks_when_vamd_changed_outside(window, tmp_path, monkeypatch):
     """構文ファイルが外で書き換えられていれば、黙って上書きしない（取り込む・上書きする・やめる）。"""
     window.session.pdf_path = tmp_path / "準備書面.pdf"
     assert window.on_save()
@@ -225,20 +245,20 @@ def test_save_asks_when_vadm_changed_outside(window, tmp_path, monkeypatch):
     _change_outside(window, "争う。", "否認する。")
     monkeypatch.setattr(file_ops, "ChangedOutsideDialog", fake_changed(None))
     assert not window.on_save()
-    assert asked == [True] and "否認する。" in window.session.vadm_path.read_text(encoding="utf-8")
+    assert asked == [True] and "否認する。" in window.session.vamd_path.read_text(encoding="utf-8")
 
     # 取り込む：外の中身をエディターに取り込んでから保存する
     monkeypatch.setattr(file_ops, "ChangedOutsideDialog", fake_changed("import"))
     assert window.on_save()
     assert "〔人名Ａ〕の主張は否認する。" in window.raw_text()
-    assert window.session.version == 2 and not window.session.vadm_changed_outside()   # やめたときは保存していない
+    assert window.session.version == 2 and not window.session.vamd_changed_outside()   # やめたときは保存していない
 
     # 上書きする：エディターの文章で保存する
     _change_outside(window, "否認する。", "認める。")
     monkeypatch.setattr(file_ops, "ChangedOutsideDialog", fake_changed("overwrite"))
     assert window.on_save()
-    assert "否認する。" in window.session.vadm_path.read_text(encoding="utf-8")
-    assert not window.session.vadm_changed_outside()
+    assert "否認する。" in window.session.vamd_path.read_text(encoding="utf-8")
+    assert not window.session.vamd_changed_outside()
 
 
 def test_find_and_replace(window):
@@ -341,7 +361,7 @@ def test_ribbon_groups_and_reflow(window):
 @pytest.mark.skipif(app.os.name != "nt", reason="IME の書体は Windows だけ")
 def test_ime_composition_font_matches_editor(window):
     """IME の入力中の文字を、エディターと同じ書体で表示する（Tk のままでは System の小さい書体になる）。"""
-    from va_documake import ime
+    from va_document import ime
     family, size = theme.editor_font(window)
     assert ime.set_composition_font(window.text, family, size) >= 1
     face, height = ime.composition_font(window.text)
@@ -530,7 +550,7 @@ def test_save_guard_for_tokens_and_separator(window, tmp_path, monkeypatch):
     errors = []
     monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: errors.append(a[1]))
     # 区切りの行が紛れ込んでいたら、保存しない
-    window.text.insert("end", "==== VA DocuMake 文書ID ABCDEFGH 版 1 ====\n")
+    window.text.insert("end", "==== VA Document 文書ID ABCDEFGH 版 1 ====\n")
     assert not window.on_save()
     assert errors and not (tmp_path / "準備書面.pdf").exists()
     assert "Ctrl+Z" in errors[0] and "［貼り付け］で取り込んで" in errors[0]      # AI の回答を Ctrl+V で貼ったときの案内
@@ -565,11 +585,11 @@ def quiet_faulthandler():
 def test_print_to_pdf_printer(window, tmp_path, monkeypatch, quiet_faulthandler):
     """［印刷］：Microsoft Print to PDF に印刷し、実際のサイズ（A4）で、字の位置がずれないことを確かめる。"""
     import fitz
-    from va_documake import printing
+    from va_document import printing
     if "Microsoft Print to PDF" not in printing.printers():
         pytest.skip("Microsoft Print to PDF がない")
     out = tmp_path / "印刷.pdf"
-    # VA DocuMake の印刷画面で「Microsoft Print to PDF」・1部・すべてのページを選んだことにする
+    # VA Document の印刷画面で「Microsoft Print to PDF」・1部・すべてのページを選んだことにする
     chosen = []
 
     class Choose:
@@ -782,7 +802,7 @@ def test_first_line_indent_button(window):
 def test_buttons_have_icons(window):
     """ボタンにアイコン（Fluent UI System Icons）を付ける。ページ送り・表示倍率はアイコンだけ。"""
     from tkinter import ttk
-    from va_documake import icons
+    from va_document import icons
     assert window.icons is not None
 
     def buttons(w):
@@ -819,7 +839,7 @@ def test_buttons_have_icons(window):
 
 def test_buttons_have_tooltips(window):
     """ボタンにマウスを重ねると説明が出る（ショートカットキーも書く）。"""
-    from va_documake import tooltip
+    from va_document import tooltip
     tips = {t.text: t for t in window._tooltips}
     assert len(window._tooltips) >= 20
     assert "Ctrl+S" in tooltip.TIPS["保存"] and tooltip.TIPS["保存"] in tips
@@ -831,7 +851,7 @@ def test_buttons_have_tooltips(window):
         assert tooltip.TIPS[key] in tips
     # メインの画面のボタン・チェックは、すべて説明を持つ（ボタンを足したときの付け忘れを見つける。2026-10-25、
     # ［ヘッダー］に説明がなかった）。アイコンだけのボタンは、字の代わりにアイコンの名前で見る
-    from va_documake import icons
+    from va_document import icons
     names = {v: k for k, v in icons.ICON_ONLY.items()}
 
     def labels(w):
@@ -874,9 +894,9 @@ def test_window_position_is_restored(tmp_path):
     src = str(Path(__file__).resolve().parents[1] / "src")
     settings = tmp_path / "settings.json"
     common = (f"import sys, json, pathlib; sys.path.insert(0, {src!r})\n"
-              "from va_documake import config, app\n"
+              "from va_document import config, app\n"
               f"config.config_path = lambda: pathlib.Path({str(settings)!r})\n"
-              f"cfg = config.load(); cfg.vadm_folder = {str(tmp_path)!r}\n"
+              f"cfg = config.load(); cfg.vamd_folder = {str(tmp_path)!r}\n"
               "w = app.MainWindow(cfg=cfg)\n")
     first = common + ("w.geometry('1100x720+60+70'); w.update()\n"
                       "w.panes.sash_place(0, 500, 0); w.update()\n"
@@ -963,7 +983,7 @@ def test_bold_on_heading_line_applies_to_same_level(window):
         return window.raw_text().split("\n")[:6]
     window.text.mark_set("insert", "1.2")
     window.on_bold()
-    # 「**# 見出し**」の形は、VA DocuMakeが書く形（# **見出し**）にそろう
+    # 「**# 見出し**」の形は、VA Documentが書く形（# **見出し**）にそろう
     assert lines() == ["# **請求の原因**", "本文。", "## 小見出し", "# **被告の主張**", "本文の**一部**。", "# **結論**"]
     window.text.mark_set("insert", "6.3")
     window.on_bold()                                     # 太字の見出しで押すと、同じ段の太字をすべて外す
@@ -997,7 +1017,7 @@ def test_marks_wrapped_in_bold_in_editor(window):
     window.text.mark_set("insert", "1.5")
     window.on_align(":-: ")
     assert window.text.get("1.0", "1.end") == ":-: **準備書面（１）**"
-    r = vadm.review(vadm.parse_text("==== VA DocuMake 文書ID K7Q29XMD 版 1 ====\n**:=: 準備書面**\n"),
+    r = vamd.review(vamd.parse_text("==== VA Document 文書ID K7Q29XMD 版 1 ====\n**:=: 準備書面**\n"),
                      "K7Q29XMD", 1, [":=: 準備書面"], window.session.dictionary)
     assert not r.lost_marks
 
@@ -1206,7 +1226,7 @@ def test_align_buttons_on_separator_row_change_column(window):
     assert sep() == "|:===:|:===:|"
     window.text.edit_undo()
     assert sep() == "|===|===|"
-    from va_documake.document import CENTER, parse_separator
+    from va_document.document import CENTER, parse_separator
     window.on_align(":-: ")
     assert parse_separator(sep()) == ([CENTER, CENTER], True)       # 2重線のまま
 
@@ -1246,7 +1266,7 @@ def test_options_change_folder_and_editor(window, tmp_path, monkeypatch):
     これまでの場所の構文ファイルを使い続ける（2026-10-24 班長指示）。"""
     window.session.pdf_path = tmp_path / "準備書面.pdf"
     assert window.on_save()
-    old = window.session.vadm_path
+    old = window.session.vamd_path
     shared = tmp_path / "共有"
     shared.mkdir()
     family = (app.theme.editor_font_choices(window) or [""])[0]
@@ -1254,29 +1274,29 @@ def test_options_change_folder_and_editor(window, tmp_path, monkeypatch):
     class Answer:
         def __init__(self, parent, cfg, choices, size_range, spacing_range, prompt, default_prompt):
             assert size_range == (8, 20) and spacing_range == (6, 15) and prompt == default_prompt
-            self.result = {"vadm_folder": str(shared), "font_family": family, "font_size": 14, "line_spacing": 9,
+            self.result = {"vamd_folder": str(shared), "font_family": family, "font_size": 14, "line_spacing": 9,
                            "prompt": None}
     monkeypatch.setattr(app, "OptionsDialog", Answer)
     window.on_options()
-    assert window.cfg.vadm_folder == str(shared) and window.cfg.editor_font_size == 14
-    assert str(window.doc_id_label.cget("text")) == f"構文（VADM）ファイル：{window.session.doc_id}.vadm"   # 保存した文書
+    assert window.cfg.vamd_folder == str(shared) and window.cfg.editor_font_size == 14
+    assert str(window.doc_id_label.cget("text")) == f"構文（VAMD）ファイル：{window.session.doc_id}.vamd"   # 保存した文書
     assert str(window.pdf_name_label.cget("text")) == "書式付き（PDF）ファイル：準備書面.pdf"
-    assert window.session.vadm_path == old                      # 今の文書は、これまでの構文ファイル
+    assert window.session.vamd_path == old                      # 今の文書は、これまでの構文ファイル
     from tkinter import font as tkfont
     assert tkfont.Font(window, font=window.text.cget("font")).actual("size") == 14
     assert int(str(window.text.cget("spacing2"))) == round(9 * window.winfo_fpixels("1p"))     # ポイントを画素に
     saved = app.config.load(app.config.config_path())
-    assert (saved.editor_font_size, saved.editor_line_spacing_pt, saved.vadm_folder) == (14, 9, str(shared))
+    assert (saved.editor_font_size, saved.editor_line_spacing_pt, saved.vamd_folder) == (14, 9, str(shared))
     # 新しい文書は、新しい場所に保存する
     monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
     assert window.on_close_document()
-    assert window.session.vadm_path.parent == shared
+    assert window.session.vamd_path.parent == shared
     window.cfg.editor_font_size, window.cfg.editor_line_spacing_pt, window.cfg.editor_font_family = 11, 6, ""
     window._apply_editor_prefs()
 
 
 def test_close_document_starts_new_one(window, monkeypatch):
-    """［閉じる］は今の文書を閉じて新しい文書にする（VA DocuMake は終わらない）。保存していない変更があれば尋ねる。"""
+    """［閉じる］は今の文書を閉じて新しい文書にする（VA Document は終わらない）。保存していない変更があれば尋ねる。"""
     asked = []
     monkeypatch.setattr(messagebox, "askyesnocancel", lambda *a, **k: asked.append(a[1]))
     old_id = window.session.doc_id
@@ -1289,11 +1309,11 @@ def test_close_document_starts_new_one(window, monkeypatch):
     assert window.on_close_document()
     assert window.session.doc_id != old_id and window.raw_text() == "" and window.winfo_exists()
     # 閉じた後（エディターが空）は「開かれていません」、書いたが保存していなければ「保存していません」
-    assert str(window.doc_id_label.cget("text")) == "構文（VADM）ファイル：（開かれていません）"
+    assert str(window.doc_id_label.cget("text")) == "構文（VAMD）ファイル：（開かれていません）"
     assert str(window.pdf_name_label.cget("text")) == "書式付き（PDF）ファイル：（開かれていません）"
     window.text.insert("1.0", "本文。")
     window.on_text_modified()
-    assert str(window.doc_id_label.cget("text")) == "構文（VADM）ファイル：（保存していません）"
+    assert str(window.doc_id_label.cget("text")) == "構文（VAMD）ファイル：（保存していません）"
     assert str(window.pdf_name_label.cget("text")) == "書式付き（PDF）ファイル：（保存していません）"
     assert not window.tree.get_children()
 
@@ -1329,46 +1349,46 @@ def test_ai_prompt_in_options(window, tmp_path, monkeypatch):
     これから作る文書に使う。既定に戻すこともできる（2026-10-24 班長指示）。"""
     window.session.pdf_path = tmp_path / "準備書面.pdf"
     assert window.on_save()
-    custom = vadm.PROMPT.rstrip() + "\n・短く書け。\n"
+    custom = vamd.PROMPT.rstrip() + "\n・短く書け。\n"
 
     def answer(prompt_text):
         class Answer:
             def __init__(self, parent, cfg, choices, size_range, spacing_range, prompt, default_prompt):
-                self.result = {"vadm_folder": cfg.vadm_folder, "font_family": cfg.editor_font_family,
+                self.result = {"vamd_folder": cfg.vamd_folder, "font_family": cfg.editor_font_family,
                                "font_size": cfg.editor_font_size, "line_spacing": cfg.editor_line_spacing_pt,
                                "prompt": prompt_text}
         return Answer
     monkeypatch.setattr(app, "OptionsDialog", answer(custom))
     window.on_options()
     assert window.session.prompt == custom and window.cfg.ai_prompt == custom
-    saved = window.session.vadm_path.read_text(encoding="utf-8")
+    saved = window.session.vamd_path.read_text(encoding="utf-8")
     assert "・短く書け。" in saved and "版 1" in saved                    # 版は変えずに指示だけ書き直す
-    assert not window.session.vadm_changed_outside()
+    assert not window.session.vamd_changed_outside()
     monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
     assert window.on_close_document()
     assert window.session.prompt == custom                                 # 新しい文書にも使う
-    monkeypatch.setattr(app, "OptionsDialog", answer(vadm.PROMPT))          # 既定に戻す
+    monkeypatch.setattr(app, "OptionsDialog", answer(vamd.PROMPT))          # 既定に戻す
     window.on_options()
     assert window.session.prompt is None and window.cfg.ai_prompt == ""
 
 
 def test_prompt_dialog_reset(window):
-    from va_documake.dialogs import PromptDialog
+    from va_document.dialogs import PromptDialog
 
     def run():
         d = [c for c in window.winfo_children() if isinstance(c, PromptDialog)][-1]
         d.text.insert("end", "\n・足した。")
         d.reset()
-        assert d.text.get("1.0", "end-1c") == vadm.PROMPT.rstrip("\n")
+        assert d.text.get("1.0", "end-1c") == vamd.PROMPT.rstrip("\n")
         d.text.insert("end", "\n・足した。")
         d.accept()
     window.after(200, run)
-    dlg = PromptDialog(window, vadm.PROMPT, vadm.PROMPT)
+    dlg = PromptDialog(window, vamd.PROMPT, vamd.PROMPT)
     assert dlg.result.endswith("・足した。\n")
 
 
 def test_parse_pages():
-    from va_documake.printing import parse_pages
+    from va_document.printing import parse_pages
     assert parse_pages("1-3, 5", 6) == [0, 1, 2, 4]
     assert parse_pages("２－３，２", 4) == [1, 2]
     assert parse_pages("4-", 6) == [3, 4, 5]
@@ -1380,7 +1400,7 @@ def test_parse_pages():
 @pytest.mark.skipif(app.os.name != "nt", reason="印刷は Windows だけ")
 def test_print_dialog_choices(window):
     """印刷の画面：プリンター・ページ（すべて・確認表示のページ・指定）・部数を選ぶ。"""
-    from va_documake.dialogs import PrintDialog
+    from va_document.dialogs import PrintDialog
     results = []
 
     def run(setup):
@@ -1398,13 +1418,13 @@ def test_print_dialog_choices(window):
 def test_line_numbers_check(window, tmp_path):
     """「スタイル」の［行番号］のチェックで行番号を付ける。構文ファイルの区切りの行に残し、内容証明では付けない
     （VA公用文のセットアップと同じ。2026-10-24 班長指示）。"""
-    from va_documake.doctypes import DOC_TYPES
+    from va_document.doctypes import DOC_TYPES
     assert not window.line_numbers_var.get()
     window.line_numbers_check.invoke()
     assert window.session.settings.line_numbers and window.cfg.line_numbers
     window.session.pdf_path = tmp_path / "準備書面.pdf"
     assert window.on_save()
-    assert "行番号 あり" in window.session.vadm_path.read_text(encoding="utf-8")
+    assert "行番号 あり" in window.session.vamd_path.read_text(encoding="utf-8")
     window.doc_type_box.set(DOC_TYPES["Naiyou"].label)
     window.on_settings_changed()
     assert not window.session.settings.line_numbers and not window.line_numbers_var.get()
@@ -1416,7 +1436,7 @@ def test_line_numbers_check(window, tmp_path):
 def test_one_width_check(window, tmp_path):
     """「スタイル」の［番号1字］のチェックで、見出し番号を全角1字の幅に縮める。構文ファイルの区切りの行に残し、
     契約書1・技術文書では使えない（2026-10-26 班長指示）。"""
-    from va_documake.doctypes import DOC_TYPES
+    from va_document.doctypes import DOC_TYPES
     window.text.delete("1.0", "end")
     window.text.insert("1.0", "#\n## 当事者\n## 次")
     window.refresh()
@@ -1426,7 +1446,7 @@ def test_one_width_check(window, tmp_path):
     assert "".join(g.ch for g in window.session.layout_map.lines[0].glyphs).startswith("第１１　当事者")
     window.session.pdf_path = tmp_path / "準備書面.pdf"
     assert window.on_save()
-    assert "番号1字 あり" in window.session.vadm_path.read_text(encoding="utf-8")
+    assert "番号1字 あり" in window.session.vamd_path.read_text(encoding="utf-8")
     window.doc_type_box.set(DOC_TYPES["Technical"].label)
     window.on_settings_changed()
     assert not window.session.settings.one_width and not window.one_width_var.get()
@@ -1436,19 +1456,19 @@ def test_one_width_check(window, tmp_path):
     assert str(window.one_width_check.cget("state")) == "normal" and not window.session.settings.one_width
 
 
-def test_copy_vadm_saves_first_and_tells(window, tmp_path, monkeypatch):
+def test_copy_vamd_saves_first_and_tells(window, tmp_path, monkeypatch):
     """［コピー］は、保存していない変更があれば先に保存し、保存したことも下の欄に出す（2026-10-26 班長指摘）。"""
     monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
     window.session.pdf_path = tmp_path / "準備書面.pdf"
-    window.on_copy_vadm()
+    window.on_copy_vamd()
     assert window.session.version == 1
     assert window.status.cget("text").startswith("版 1 を保存し、AI に渡す構文ファイル")
-    assert window.clipboard_get() == window.session.vadm_path.read_text(encoding="utf-8")
-    window.on_copy_vadm()                    # 保存していない変更がなければ、保存しない
+    assert window.clipboard_get() == window.session.vamd_path.read_text(encoding="utf-8")
+    window.on_copy_vamd()                    # 保存していない変更がなければ、保存しない
     assert window.session.version == 1 and window.status.cget("text").startswith("AI に渡す構文ファイル")
 
 
-def test_copy_vadm_path(window, tmp_path):
+def test_copy_vamd_path(window, tmp_path):
     """［パスをコピー］で構文ファイルのフルパスをコピーする（保存するまでは押せない。2026-10-24 班長指示）。"""
     assert str(window.copy_path_button.cget("state")) == "disabled"
     window.session.pdf_path = tmp_path / "準備書面.pdf"
@@ -1456,7 +1476,7 @@ def test_copy_vadm_path(window, tmp_path):
     assert str(window.copy_path_button.cget("state")) == "normal"
     window.clipboard_clear()
     window.copy_path_button.invoke()
-    assert window.clipboard_get() == str(window.session.vadm_path) and window.session.vadm_path.is_absolute()
+    assert window.clipboard_get() == str(window.session.vamd_path) and window.session.vamd_path.is_absolute()
     assert "パスをコピーしました" in str(window.status.cget("text"))
 
 
@@ -1516,7 +1536,7 @@ def test_register_dialog_requires_letters(window, monkeypatch):
     """仮名化の画面：記号の字は自動で入れず、利用者が必ず打つ（英字・数字・漢字など。2026-10-25 班長決定・班長指示）。
     今ほかの語に使っている記号・空・使えない字なら、理由を知らせて画面を閉じない。解除した記号を別の語に付けるときは
     確かめる。この文書で使っている記号・解除した記号を示す。"""
-    from va_documake.dialogs import EditDialog, RegisterDialog
+    from va_document.dialogs import EditDialog, RegisterDialog
     d = window.session.dictionary                     # 甲野太郎＝〔人名Ａ〕
     d.register("丙川次郎", "人名", "B")
     d.unregister("丙川次郎")

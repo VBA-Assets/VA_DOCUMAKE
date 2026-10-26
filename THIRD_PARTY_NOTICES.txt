@@ -1,7 +1,7 @@
-VA DocuMake が使っている部品のライセンスの表示
+VA Document が使っている部品のライセンスの表示
 
-VA DocuMake そのものは、GNU Affero General Public License 第3版（AGPL-3.0）で公開しています（LICENSE）。
-VA DocuMake の実行ファイル（VA_DocuMake.exe）には、次の部品が入っています（IPAフォントは、ソースにだけ入っています）。
+VA Document そのものは、GNU Affero General Public License 第3版（AGPL-3.0）で公開しています（LICENSE）。
+VA Document の実行ファイル（VA_Document.exe）には、次の部品が入っています（IPAフォントは、ソースにだけ入っています）。
 ＭＳ 明朝・ＭＳ ゴシックは入っていません（Windows に入っているものを、埋め込みの許可の範囲で PDF に埋め込みます）。
 
 ==============================================================================
@@ -739,7 +739,7 @@ terms specified in this license.
 PyMuPDF 1.28.0
 用途：PDF の表示・印刷・読み書き
 ライセンス：GNU Affero General Public License 第3版（AGPL-3.0）
-ライセンスの全文は、VA DocuMake の LICENSE（AGPL-3.0）と同じです。PyMuPDF の表示：Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License
+ライセンスの全文は、VA Document の LICENSE（AGPL-3.0）と同じです。PyMuPDF の表示：Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License
 ==============================================================================
 
 ==============================================================================

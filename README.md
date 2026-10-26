@@ -1,22 +1,24 @@
-# VA DocuMake — 実名を AI に渡さずに、VA公用文と同じ書式の文書を作るツール
+# VA Document — 実名を AI に渡さずに、VA公用文と同じ書式の文書を作るツール
 
-VA DocuMake は、弁護士が AI（Claude など）で書面を起案・推敲するときに、依頼者などの名前を記号（〔人名Ａ〕など）に置き換えてから渡し、AI の回答を取り込むと元の名前に戻し、裁判所提出書類・公用文・契約書などを VA公用文（Word のアドイン）で整えたものと同じ書式の PDF にする、Windows 用の無料ツールです（Python 製）。Word のマクロを使わないので、マクロの使用を禁止されていて VA公用文・VA仮名化を使えない事務所でも使えます。
+VA Document は、弁護士が AI（Claude など）で書面を起案・推敲するときに、依頼者などの名前を記号（〔人名Ａ〕など）に置き換えてから渡し、AI の回答を取り込むと元の名前に戻し、裁判所提出書類・公用文・契約書などを VA公用文（Word のアドイン）で整えたものと同じ書式の PDF にする、Windows 用の無料ツールです（Python 製）。Word のマクロを使わないので、マクロの使用を禁止されていて VA公用文・VA仮名化を使えない事務所でも使えます。
+
+Ver160 までは「VA DocuMake」という名前でした（2026-10-27 の Ver200 で改めました）。
 
 - 配布：[VBAアセット](https://vba-assets.net/)（実行ファイルとインストーラーは、サイトの記事からダウンロードしてください）
 - ライセンス：GNU Affero General Public License 第3版（[LICENSE](LICENSE)）。使っている部品のライセンスは [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)
-- 操作マニュアル：[docs/manual/VA_DocuMake_操作マニュアル.md](docs/manual/VA_DocuMake_操作マニュアル.md)
+- 操作マニュアル：[docs/manual/VA_Document_操作マニュアル.md](docs/manual/VA_Document_操作マニュアル.md)
 - 仕様：[仕様.md](仕様.md)
 
 ## フォルダの構成
 
 | フォルダ・ファイル | 内容 |
 |---|---|
-| `src/va_documake/` | 本体のソース |
+| `src/va_document/` | 本体のソース |
 | `tests/` | テスト（pytest）。`tests/data/` は、VA公用文で整えた見本の文書と、その字の位置（正解） |
 | `scripts/` | マニュアルの PDF・アイコン・ライセンスの表示・配布物を作るスクリプト |
 | `assets/` | アプリのアイコン |
 | `main.py` | ソースから起動するときの入口 |
-| `va_documake.spec` | 実行ファイルを作る PyInstaller の設定 |
+| `va_document.spec` | 実行ファイルを作る PyInstaller の設定 |
 
 開発用の内部資料（検討のメモ、VA公用文の正解を作るために Word を操作する試作の道具）は、このリポジトリには含めていません。ソースのコメントでそれらを参照している箇所があります。
 
@@ -43,7 +45,7 @@ python3 main.py
 - Ctrl のキー（Ctrl+S など）は、⌘ でも効きます（置換の Ctrl+H は Ctrl だけ。⌘H は Mac の「隠す」のため）。
 - Mac の実機では動作を確かめていません。
 
-テストは `python -m pytest` で走ります。実行ファイルは `python -m PyInstaller va_documake.spec --noconfirm` で `dist\VA_DocuMake.exe` にできます。
+テストは `python -m pytest` で走ります。実行ファイルは `python -m PyInstaller va_document.spec --noconfirm` で `dist\VA_Document.exe` にできます。
 
 ## ライセンス
 

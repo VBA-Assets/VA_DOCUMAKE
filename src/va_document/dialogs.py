@@ -183,7 +183,7 @@ class ChangedOutsideDialog(_Dialog):
         self.result = None
         body = ttk.Frame(self, padding=(16, 14, 16, 4))
         body.pack(fill="both")
-        msg = ("構文ファイル（VADM）が、VA DocuMakeの外で書き換えられています"
+        msg = ("構文ファイル（VAMD）が、VA Documentの外で書き換えられています"
                "（テキストエディターで直した、AI の回答を上書き保存した、など）。\n")
         if at_save:
             msg += ("このまま保存すると、外で書き換えた中身は消えます。\n"
@@ -266,7 +266,7 @@ class NaiyouDialog(_Dialog):
 
 class OptionsDialog(_Dialog):
     """オプション（構文ファイルの保存場所、エディターの書体・字の大きさ・行の間隔。2026-10-24 班長指示）。
-    result は {"vadm_folder", "font_family", "font_size", "line_spacing"}（やめたら None）。"""
+    result は {"vamd_folder", "font_family", "font_size", "line_spacing"}（やめたら None）。"""
 
     def __init__(self, parent, cfg, font_choices, size_range, spacing_range, prompt, default_prompt):
         super().__init__(parent, "オプション")
@@ -275,9 +275,9 @@ class OptionsDialog(_Dialog):
         self.prompt, self.default_prompt, self.new_prompt = prompt, default_prompt, None
         body = ttk.Frame(self, padding=(16, 14, 16, 4))
         body.pack(fill="both", expand=True)
-        box = ttk.Labelframe(body, text="構文ファイル（.vadm）の保存場所", padding=(10, 6))
+        box = ttk.Labelframe(body, text="構文ファイル（.vamd）の保存場所", padding=(10, 6))
         box.pack(fill="x")
-        self.folder = tk.StringVar(value=cfg.vadm_folder)
+        self.folder = tk.StringVar(value=cfg.vamd_folder)
         row = ttk.Frame(box)
         row.pack(fill="x")
         ttk.Entry(row, textvariable=self.folder, width=60).pack(side="left", fill="x", expand=True)
@@ -355,7 +355,7 @@ class OptionsDialog(_Dialog):
                                  f"{self.spacing_range[0]}〜{self.spacing_range[1]} の数字にしてください。", parent=self)
             return
         family = self.family.get()
-        self.result = {"vadm_folder": folder, "font_family": "" if family == "（既定）" else family,
+        self.result = {"vamd_folder": folder, "font_family": "" if family == "（既定）" else family,
                        "font_size": size, "line_spacing": spacing, "prompt": self.new_prompt}
         self.destroy()
 
@@ -396,7 +396,7 @@ class PromptDialog(_Dialog):
 
 
 class PrintDialog(_Dialog):
-    """VA DocuMake の「印刷」画面（プリンター・部数・ページ。2026-10-24 班長決定。Windows 11 の新しい印刷画面は、
+    """VA Document の「印刷」画面（プリンター・部数・ページ。2026-10-24 班長決定。Windows 11 の新しい印刷画面は、
     プレビューの欄に「このアプリは印刷プレビューをサポートしていません」と出て紛らわしいため）。
     result は (プリンターの名前, DEVMODE〔プロパティで直さなければ None〕, 部数, ページ〔0 から〕のリスト)。やめたら None。"""
 

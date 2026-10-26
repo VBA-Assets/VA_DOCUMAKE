@@ -2,7 +2,7 @@
 
 正解は、試作\\Make-VaKouyoubunPdf.ps1 -Toc で、別の Word から読み取った（tests\\data\\目次）。
 Word の目次には題の行（「内容」）と、目次の後の空の行2つが入るので、見本にも同じ行を入れて比べる
-（VA DocuMakeの目次は題を付けない。2026-10-24 班長決定）。
+（VA Documentの目次は題を付けない。2026-10-24 班長決定）。
 ・項目の文字列・ページ番号・行・ページは、すべて一致すること。
 ・字の左右の位置は 1pt 以内（1字目は Word の読み取りが崩れることがあるので、2字目から比べる）。
   ただし、折り返した見出しは、Word と組み方を変えたので（2026-10-24 班長決定）、Word とは比べず、
@@ -16,12 +16,12 @@ from pathlib import Path
 
 import fitz
 
-from va_documake import vadm
-from va_documake.cleanup import clean
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import TOC, parse
-from va_documake.layout import TOC_TAB_FROM_RIGHT, Typesetter
-from va_documake.pdfwriter import pdf_bytes
+from va_document import vamd
+from va_document.cleanup import clean
+from va_document.doctypes import DOC_TYPES
+from va_document.document import TOC, parse
+from va_document.layout import TOC_TAB_FROM_RIGHT, Typesetter
+from va_document.pdfwriter import pdf_bytes
 
 DATA = Path(__file__).parent / "data" / "目次"
 
@@ -165,4 +165,4 @@ def test_toc_levels_can_be_given_in_the_mark():
     assert toc_texts("[TOC:4]") == ["第１ 第一", "１ 小", "(1) 細", "ア 四段"]
     # 段が 1〜9 でなければ記号ではない（そのまま本文になる）
     assert parse(["[TOC:0]"], dt)[0].kind != TOC
-    assert vadm.is_line_mark(" [TOC:2] ") and not vadm.is_line_mark("[TOC:10]")
+    assert vamd.is_line_mark(" [TOC:2] ") and not vamd.is_line_mark("[TOC:10]")

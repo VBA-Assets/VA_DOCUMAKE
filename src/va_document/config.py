@@ -4,7 +4,7 @@
 （構文ファイルから PDF を探すため。9.2）、前回終了したときのウィンドウの大きさ・位置・確認表示の幅、
 オプション（エディターの書体・字の大きさ・行の間隔。2026-10-24 班長指示）だけで、文章の中身・辞書・対応表は書かない。
 フォルダの名前に実名が入ることがあるので、設定ファイルは AI に渡さない（手引きに書く）。
-置き場所は %APPDATA%\\VA DocuMake\\settings.json（Windows 以外はホームの .va_documake）。
+置き場所は %APPDATA%\\VA Document\\settings.json（Windows 以外はホームの .va_document）。
 """
 import json
 import os
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .doctypes import DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_LABELS
 from .theme import EDITOR_FONT_SIZE, EDITOR_LINE_SPACING
-from .vadm import default_folder
+from .vamd import default_folder
 
 MAX_PDF_FOLDERS = 50
 FONT_SIZE_RANGE = (8, 20)       # オプションで選べるエディターの字の大きさ（ポイント）
@@ -23,8 +23,8 @@ LINE_SPACING_RANGE = (6, 15)    # 同じく行の間隔（ポイント。6 よ�
 def config_path():
     base = os.environ.get("APPDATA")
     if base:
-        return Path(base) / "VA DocuMake" / "settings.json"
-    return Path.home() / ".va_documake" / "settings.json"
+        return Path(base) / "VA Document" / "settings.json"
+    return Path.home() / ".va_document" / "settings.json"
 
 
 @dataclass
@@ -33,7 +33,7 @@ class AppConfig:
     page_number: str = PAGE_NUMBER_BOTTOM_CENTER
     line_numbers: bool = False      # 行番号（新しい文書の既定。2026-10-24 班長指示）
     one_width: bool = False         # 見出し番号を1字の幅に縮める（新しい文書の既定。2026-10-26 班長指示）
-    vadm_folder: str = ""
+    vamd_folder: str = ""
     pdf_folders: list = field(default_factory=list)   # 新しく使ったものが先
     # 前回終了したときのウィンドウ（2026-10-23 班長指示：起動時に元に戻す）
     window_geometry: str = ""      # 最大化していないときの「幅x高さ+x+y」
@@ -54,8 +54,8 @@ class AppConfig:
             self.line_numbers = False
         if not isinstance(self.one_width, bool):
             self.one_width = False
-        if not self.vadm_folder:
-            self.vadm_folder = str(default_folder())
+        if not self.vamd_folder:
+            self.vamd_folder = str(default_folder())
         if not isinstance(self.editor_font_size, int) or not FONT_SIZE_RANGE[0] <= self.editor_font_size <= FONT_SIZE_RANGE[1]:
             self.editor_font_size = EDITOR_FONT_SIZE
         if (not isinstance(self.editor_line_spacing_pt, int)

@@ -1,9 +1,9 @@
 """複合見出し（字のない見出しの行のすぐ後の見出しを1行にまとめる。VA疑似アウトラインと同じ。2026-10-24 班長指示）。"""
-from va_documake import config
-from va_documake.doctypes import DOC_TYPES, doc_type_for
-from va_documake.document import HEADING, parse
-from va_documake.layout import Typesetter
-from va_documake.session import Session
+from va_document import config
+from va_document.doctypes import DOC_TYPES, doc_type_for
+from va_document.document import HEADING, parse
+from va_document.layout import Typesetter
+from va_document.session import Session
 
 DT = DOC_TYPES["Saiban"]
 LONG = "当事者は、長い見出しを折り返すと、２行目はまとめた段の数だけ右から始まる。"
@@ -69,7 +69,7 @@ def test_one_width_composite_squeezed():
 def test_squeezed_number_in_pdf(tmp_path):
     """縮めた括弧の番号は、PDF でも横の倍率を掛けて描き、字は並びのまま残る（突き合わせで読める）。"""
     import fitz
-    from va_documake.pdfwriter import write_pdf
+    from va_document.pdfwriter import write_pdf
     ts, paras, by = lines_by_para(["###", "#### 見出し"], doc_type_for("Saiban", True))
     lines = [ln for k in sorted(by) for ln in by[k]]
     out = tmp_path / "a.pdf"
@@ -102,7 +102,7 @@ def test_not_merged_when_left_add_is_not_one():
 
 def test_editor_position_round_trip():
     text = "#\n## 当事者\n本文。"
-    s = Session(config.AppConfig(vadm_folder="未使用"))
+    s = Session(config.AppConfig(vamd_folder="未使用"))
     s.typeset(text)
     m = s.layout_map
     for ch in "当者":

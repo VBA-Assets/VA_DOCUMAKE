@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from va_documake import vadm
-from va_documake.doctypes import DOC_TYPES, PAGE_NUMBER_TOP_RIGHT, doc_type_for
-from va_documake.document import parse
-from va_documake.layout import Typesetter
-from va_documake.pdfwriter import write_pdf
-from va_documake.pseudonym import Dictionary
-from va_documake.recover import PdfMismatch, rebuild_dictionary, recover
+from va_document import vamd
+from va_document.doctypes import DOC_TYPES, PAGE_NUMBER_TOP_RIGHT, doc_type_for
+from va_document.document import parse
+from va_document.layout import Typesetter
+from va_document.pdfwriter import write_pdf
+from va_document.pseudonym import Dictionary
+from va_document.recover import PdfMismatch, rebuild_dictionary, recover
 
 DATA = Path(__file__).parent / "data"
 TRIAL = DATA / "AI往復試験"
@@ -18,37 +18,37 @@ TRIAL = DATA / "AI往復試験"
 # ---------- 書き出し・読み込み ----------
 
 def test_doc_id():
-    ids = {vadm.new_doc_id() for _ in range(50)}
+    ids = {vamd.new_doc_id() for _ in range(50)}
     assert len(ids) == 50
     assert all(len(i) == 8 and not set(i) & set("0O1I") for i in ids)
-    assert vadm.file_name("K7Q29XMD") == "K7Q29XMD.vadm"
+    assert vamd.file_name("K7Q29XMD") == "K7Q29XMD.vamd"
 
 
 def test_build_and_read_back(tmp_path):
-    settings = vadm.Settings("Keiyaku1", PAGE_NUMBER_TOP_RIGHT)
-    text = vadm.build("K7Q29XMD", 3, settings, ":=: 契約書\n# 目的\n〔人名Ａ〕は、\n\n")
-    sep = "==== VA DocuMake 文書ID K7Q29XMD 版 3 種類 契約書1（法令型） ページ番号 右上 行番号 なし 番号1字 なし ===="
+    settings = vamd.Settings("Keiyaku1", PAGE_NUMBER_TOP_RIGHT)
+    text = vamd.build("K7Q29XMD", 3, settings, ":=: 契約書\n# 目的\n〔人名Ａ〕は、\n\n")
+    sep = "==== VA Document 文書ID K7Q29XMD 版 3 種類 契約書1（法令型） ページ番号 右上 行番号 なし 番号1字 なし ===="
     assert sep in text.splitlines()
-    path = tmp_path / "K7Q29XMD.vadm"
-    vadm.write_file(path, text)
-    c = vadm.read_file(path)
+    path = tmp_path / "K7Q29XMD.vamd"
+    vamd.write_file(path, text)
+    c = vamd.read_file(path)
     assert (c.doc_id, c.version, c.settings) == ("K7Q29XMD", 3, settings)
     assert c.body == [":=: 契約書", "# 目的", "〔人名Ａ〕は、"]
     assert c.prompt is not None
     assert list(tmp_path.iterdir()) == [path]   # 一時ファイルが残らない
     # 行番号（2026-10-24）。行番号の書いていない区切りの行（それより前の構文ファイル）は「なし」
-    on = vadm.Settings("Saiban", PAGE_NUMBER_TOP_RIGHT, True)
-    assert vadm.parse_separator(vadm.separator_line("K7Q29XMD", 1, on))[2] == on
-    assert not vadm.parse_separator(sep.replace(" 行番号 なし", ""))[2].line_numbers
+    on = vamd.Settings("Saiban", PAGE_NUMBER_TOP_RIGHT, True)
+    assert vamd.parse_separator(vamd.separator_line("K7Q29XMD", 1, on))[2] == on
+    assert not vamd.parse_separator(sep.replace(" 行番号 なし", ""))[2].line_numbers
     # 見出し番号を1字の幅にするか（2026-10-26）。書いていない区切りの行（Ver152 までの構文ファイル）は「なし」
-    one = vadm.Settings("Saiban", PAGE_NUMBER_TOP_RIGHT, False, True)
-    assert vadm.parse_separator(vadm.separator_line("K7Q29XMD", 1, one))[2] == one
-    assert not vadm.parse_separator(sep.replace(" 番号1字 なし", ""))[2].one_width
+    one = vamd.Settings("Saiban", PAGE_NUMBER_TOP_RIGHT, False, True)
+    assert vamd.parse_separator(vamd.separator_line("K7Q29XMD", 1, one))[2] == one
+    assert not vamd.parse_separator(sep.replace(" 番号1字 なし", ""))[2].one_width
 
 
 def test_old_separator_without_settings():
     """往復試験の構文ファイル（設定のない区切りの行）も読める。"""
-    c = vadm.read_file(TRIAL / "K7Q29XMD.vadm")
+    c = vamd.read_file(TRIAL / "K7Q29XMD.vamd")
     assert (c.doc_id, c.version, c.settings) == ("K7Q29XMD", 1, None)
     assert c.body[0].startswith("令和８年（ワ）第〔番号Ａ〕号")
     assert c.body[-1] == "--: 以上"
@@ -56,24 +56,31 @@ def test_old_separator_without_settings():
 
 @pytest.mark.parametrize("n", [1, 2, 3])
 def test_trial_answers(n):
-    c = vadm.read_file(TRIAL / f"回答_{n}.txt")
+    c = vamd.read_file(TRIAL / f"回答_{n}.txt")
     assert (c.doc_id, c.version) == ("K7Q29XMD", 1)
     assert c.prompt is None
     assert c.body[-1] == "--: 以上"
 
 
+def test_va_documake_separator_is_not_read():
+    """Ver160 まで（VA DocuMake）の区切りの行は読まない（2026-10-27 班長決定）。"""
+    with pytest.raises(vamd.NoSeparator):
+        vamd.parse_text("==== VA DocuMake 文書ID K7Q29XMD 版 1 ====\n# 認否\n認める。\n")
+    assert vamd.file_name("K7Q29XMD").endswith(".vamd")
+
+
 def test_answer_with_preface_and_code_block():
     answer = ("ご依頼のとおり直しました。\n\n```markdown\n"
-              "==== VA DocuMake 文書ID K7Q29XMD 版 2 種類 裁判所提出書類 ページ番号 中下 ====\n"
+              "==== VA Document 文書ID K7Q29XMD 版 2 種類 裁判所提出書類 ページ番号 中下 ====\n"
               "# 認否\n認める。\n```\n\n記号はすべて元のまま残しています。\n")
-    c = vadm.parse_text(answer)
+    c = vamd.parse_text(answer)
     assert c.version == 2 and c.settings.doc_type == "Saiban"
     assert c.body == ["# 認否", "認める。"]
 
 
 def test_no_separator():
-    with pytest.raises(vadm.NoSeparator):
-        vadm.parse_text("# 認否\n認める。\n")
+    with pytest.raises(vamd.NoSeparator):
+        vamd.parse_text("# 認否\n認める。\n")
 
 
 # ---------- 取り込む前の確かめ ----------
@@ -89,22 +96,22 @@ CURRENT = [":=: 準備書面", "--: 令和８年９月１７日", "# 認否", "�
 
 
 def answer(body, version=3, doc_id="K7Q29XMD"):
-    return vadm.parse_text(f"==== VA DocuMake 文書ID {doc_id} 版 {version} ====\n" + "\n".join(body))
+    return vamd.parse_text(f"==== VA Document 文書ID {doc_id} 版 {version} ====\n" + "\n".join(body))
 
 
 def test_review_same_text_is_clean():
-    r = vadm.review(answer(CURRENT), "K7Q29XMD", 3, CURRENT, make_dictionary())
+    r = vamd.review(answer(CURRENT), "K7Q29XMD", 3, CURRENT, make_dictionary())
     assert r.clean and not r.changes
 
 
 def test_review_other_document_stops():
-    with pytest.raises(vadm.OtherDocument):
-        vadm.review(answer(CURRENT, doc_id="ZZZZZZZZ"), "K7Q29XMD", 3, CURRENT, make_dictionary())
+    with pytest.raises(vamd.OtherDocument):
+        vamd.review(answer(CURRENT, doc_id="ZZZZZZZZ"), "K7Q29XMD", 3, CURRENT, make_dictionary())
 
 
 def test_review_reports_tokens_marks_changes_and_old_version():
     body = ["準備書面", "--: 令和８年９月１７日", "# 認否", "〔人名A〕の主張は争う。〔人名Ｃ〕も同じ。", "<<<", "追加した段落。"]
-    r = vadm.review(answer(body, version=1), "K7Q29XMD", 3, CURRENT, make_dictionary())
+    r = vamd.review(answer(body, version=1), "K7Q29XMD", 3, CURRENT, make_dictionary())
     assert r.older
     assert r.unknown_tokens == ["〔人名Ｃ〕"]
     assert r.lost_tokens == ["〔法人Ａ〕"]          # 〔人名A〕（半角）は消えたことにしない
@@ -125,7 +132,7 @@ WORDS = [("甲野太郎", "人名"), ("乙山商事株式会社", "法人"), ("�
 
 
 def save_pair(tmp_path, real_lines, doc_type="Saiban", page_number=None, words=WORDS, version=5, one_width=False):
-    """実名の文章から、同じ版の PDF と構文ファイルを作る（VA DocuMakeの［保存］と同じ）。"""
+    """実名の文章から、同じ版の PDF と構文ファイルを作る（VA Documentの［保存］と同じ）。"""
     dt = doc_type_for(doc_type, one_width)
     d = Dictionary()
     for w, k in words:
@@ -135,9 +142,9 @@ def save_pair(tmp_path, real_lines, doc_type="Saiban", page_number=None, words=W
     pdf = tmp_path / "実名.pdf"
     kw = {"page_number": page_number} if page_number else {}
     write_pdf(ts, lines, str(pdf), doc_id="K7Q29XMD", version=version, **kw)
-    settings = vadm.Settings(doc_type, page_number or vadm.Settings().page_number, one_width=one_width)
-    text = vadm.build("K7Q29XMD", version, settings, d.pseudonymize("\n".join(real_lines)))
-    return d, pdf, vadm.parse_text(text)
+    settings = vamd.Settings(doc_type, page_number or vamd.Settings().page_number, one_width=one_width)
+    text = vamd.build("K7Q29XMD", version, settings, d.pseudonymize("\n".join(real_lines)))
+    return d, pdf, vamd.parse_text(text)
 
 
 @pytest.mark.parametrize("sample", ["裁判所", "長い文書"])
@@ -199,14 +206,14 @@ def test_review_reports_blank_lines_added_by_ai():
     """空の行は1行の空きになるので、AI が足した空行も変わった行として示す（文書の初めと終わりの空行は除く）。"""
     body = list(CURRENT)
     body.insert(3, "")
-    r = vadm.review(answer(body), "K7Q29XMD", 3, CURRENT + [""], make_dictionary())
+    r = vamd.review(answer(body), "K7Q29XMD", 3, CURRENT + [""], make_dictionary())
     assert r.changed_lines == [3] and not r.removed
 
 
 def test_prompt_allows_table_changes_on_request():
     """AI への指示：表の2行目・セルの配置の記号は「私が求めたときを除き」変えない。2重線はすべての列を = にする。"""
-    assert "セルの先頭の配置の記号は、私が求めたときを除き、変えない" in vadm.PROMPT
-    assert "2行目のすべての列の - を = にする" in vadm.PROMPT
+    assert "セルの先頭の配置の記号は、私が求めたときを除き、変えない" in vamd.PROMPT
+    assert "2行目のすべての列の - を = にする" in vamd.PROMPT
 
 
 @pytest.mark.parametrize("mark", ["[TOC]", "[TOC:1]"])
@@ -230,7 +237,7 @@ def test_rebuild_with_bold(tmp_path):
 
 
 def test_prompt_allows_bold_on_request():
-    assert "太字は **語**、傍点は *語* で書く" in vadm.PROMPT and "・太字・斜体" not in vadm.PROMPT
+    assert "太字は **語**、傍点は *語* で書く" in vamd.PROMPT and "・太字・斜体" not in vamd.PROMPT
 
 
 def test_rebuild_with_highlight(tmp_path):
@@ -243,18 +250,18 @@ def test_rebuild_with_highlight(tmp_path):
 
 
 def test_prompt_explains_highlight():
-    assert "==語== は私が画面で付けた目印（蛍光ペン。PDF には出ない）" in vadm.PROMPT
-    assert "蛍光ペンの記号（==語==）と均等割付の記号（[語]{5}）は、私が求めたときを除き、付け外ししない" in vadm.PROMPT
+    assert "==語== は私が画面で付けた目印（蛍光ペン。PDF には出ない）" in vamd.PROMPT
+    assert "蛍光ペンの記号（==語==）と均等割付の記号（[語]{5}）は、私が求めたときを除き、付け外ししない" in vamd.PROMPT
 
 
 def test_review_reports_lost_indent_but_not_changed_count():
     """AI の回答で +N が消えたら知らせる。字数を変えただけなら知らせない。"""
     current = ["# 認否", "+2 -> 主張は争う。"]
-    r = vadm.review(answer(["# 認否", "+3 -> 主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
+    r = vamd.review(answer(["# 認否", "+3 -> 主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
     assert not r.lost_marks
-    r = vadm.review(answer(["# 認否", "-> 主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
+    r = vamd.review(answer(["# 認否", "-> 主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
     assert [m for m, _ in r.lost_marks] == ["+N"]
-    assert "「+2 」は段落の左インデントを全角2字にする記号" in vadm.PROMPT
+    assert "「+2 」は段落の左インデントを全角2字にする記号" in vamd.PROMPT
 
 
 def test_rebuild_with_distribute(tmp_path):
@@ -327,14 +334,12 @@ def test_ai_marker_lines_are_dropped():
                 "<?thinking_complete?> 字のある行"])
     assert c.body == ["--: 以上", "<<<=", "本文に<?thinking_complete?>と書いた", "<?thinking_complete?> 字のある行"]
     assert c.dropped == ["<?thinking_complete?>", "<?x-y.z?>"]
-    r = vadm.review(c, "K7Q29XMD", 3, ["--: 以上", "<<<=", "本文に<?thinking_complete?>と書いた",
+    r = vamd.review(c, "K7Q29XMD", 3, ["--: 以上", "<<<=", "本文に<?thinking_complete?>と書いた",
                                        "<?thinking_complete?> 字のある行"], make_dictionary())
     assert not r.changes and not r.changed_lines
 
 
 def test_prompt_says_tokens_are_per_document():
-    """AI への指示に、記号は文書ごとに振ることと、ほかの文書の記号を書き写さないことを書く（2026-10-25 班長決定）。
-    前の版の既定の指示の構文ファイルは、今の版の指示に替える。"""
-    assert "記号は文書ごとに振っている" in vadm.PROMPT
-    assert "ほかの文書の記号を、この文書にそのまま書き写さない" in vadm.PROMPT
-    assert "5549654a184b34dab55b7c4faa9c44f85bded7b18f299281195518b7f714f0e0" in vadm.PREVIOUS_PROMPTS
+    """AI への指示に、記号は文書ごとに振ることと、ほかの文書の記号を書き写さないことを書く（2026-10-25 班長決定）。"""
+    assert "記号は文書ごとに振っている" in vamd.PROMPT
+    assert "ほかの文書の記号を、この文書にそのまま書き写さない" in vamd.PROMPT

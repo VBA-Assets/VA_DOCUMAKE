@@ -1,8 +1,8 @@
 """マークダウンの読み取り（仕様.md の5）。"""
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import (BLANK, BODY, BULLET, CENTER, HEADING, NUMBER, PAGE_BREAK, RIGHT,
+from va_document.doctypes import DOC_TYPES
+from va_document.document import (BLANK, BODY, BULLET, CENTER, HEADING, NUMBER, PAGE_BREAK, RIGHT,
                                       SECTION_BREAK, TITLE, TOC, parse)
-from va_documake.layout import Typesetter
+from va_document.layout import Typesetter
 
 SAIBAN = DOC_TYPES["Saiban"]
 

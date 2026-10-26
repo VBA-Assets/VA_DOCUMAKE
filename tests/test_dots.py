@@ -1,11 +1,11 @@
 """傍点（*文字*。字の上に黒丸を付ける。2026-10-24 班長指示）。"""
 import fitz
 
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import (PAGE_BREAK, TITLE, line_mark, move_wraps_after_marks, parse, split_inline,
+from va_document.doctypes import DOC_TYPES
+from va_document.document import (PAGE_BREAK, TITLE, line_mark, move_wraps_after_marks, parse, split_inline,
                                   split_inline_full)
-from va_documake.layout import DOT_RADIUS, DOT_RISE, Typesetter
-from va_documake.pdfwriter import pdf_bytes
+from va_document.layout import DOT_RADIUS, DOT_RISE, Typesetter
+from va_document.pdfwriter import pdf_bytes
 
 DT = DOC_TYPES["Saiban"]
 TEXT = ["# 認否", "被告の*主張*は**争う**。", "***重ねた語***と*二つ* *目*。", "2*3*4 や * 項目 * は、そのまま。",

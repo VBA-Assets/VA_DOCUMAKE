@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from va_documake.cleanup import clean
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import parse
-from va_documake.layout import Typesetter
+from va_document.cleanup import clean
+from va_document.doctypes import DOC_TYPES
+from va_document.document import parse
+from va_document.layout import Typesetter
 
 DATA = Path(__file__).parent / "data"
 

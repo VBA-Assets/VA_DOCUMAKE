@@ -4,7 +4,7 @@
   埋め込みが禁止されている書体（fsType の 2）は使わない（Windows の書体の再配布の条件）。
 ・PDF の文書情報（作成ソフト・作成者・日時など）と XMP は入れない（VA mints のメタデータ検出で
   「メタデータなし」になるようにするため）。
-・ファイル識別子（トレーラーの /ID）の1つ目に「VADM:<文書ID>:<版>」を入れる。2つ目は保存し直すと
+・ファイル識別子（トレーラーの /ID）の1つ目に「VAMD:<文書ID>:<版>」を入れる。2つ目は保存し直すと
   作り直されるので使わない（2026-10-23、PyMuPDF・pikepdf で確認）。
 """
 import io
@@ -57,7 +57,7 @@ LINE_NUMBER_SIZE = 8.04
 LINE_NUMBER_STEP = 5
 LINE_NUMBER_PITCH = 4.2
 LINE_NUMBER_LAST_X = 22.14
-ID_PREFIX = "VADM"
+ID_PREFIX = "VAMD"
 
 
 class FontNotEmbeddable(Exception):
@@ -76,7 +76,7 @@ def check_embeddable(path, index=0):
 def register_font(path, index=0):
     """書体を登録し、登録した名前を返す。名前は書体ファイルごとに替える（reportlab は、登録した名前に別の書体を
     登録し直せない。試験では書体の組を替えて書き出す）。PDF に入る書体の名前は、書体そのものの名前（MS-Mincho など）。"""
-    name = f"VADM-{Path(path).stem}-{index}"
+    name = f"VAMD-{Path(path).stem}-{index}"
     if name not in pdfmetrics.getRegisteredFontNames():
         check_embeddable(path, index)
         pdfmetrics.registerFont(TTFont(name, path, subfontIndex=index))
@@ -92,9 +92,9 @@ def _draw_glyph(c, x, y, g):
     """字を描く。太字の字はゴシック（ＭＳ ゴシック、Mac などでは IPAゴシック）で描き、書体を戻す。横の倍率のある字
     （複合見出しの外側の括弧の番号）は、倍率を掛けて描く。"""
     if g.bold:
-        c.setFont(c.vadm_fonts[1], FONT_SIZE)
+        c.setFont(c.vamd_fonts[1], FONT_SIZE)
         c.drawString(x, y, g.ch)
-        c.setFont(c.vadm_fonts[0], FONT_SIZE)
+        c.setFont(c.vamd_fonts[0], FONT_SIZE)
     elif getattr(g, "scale", 1.0) != 1.0:     # 表の字（TableGlyph）には倍率がない
         t = c.beginText(x, y)
         t.setHorizScale(g.scale * 100)
@@ -149,10 +149,10 @@ def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTT
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(PAGE_W, PAGE_H), invariant=1)
     # 描くときに使う書体の名前（本文、太字）。描く関数は、ここから読む
-    c.vadm_fonts = (register_font(*mincho), register_font(*gothic) if _has_bold(ts, lines) else None)
+    c.vamd_fonts = (register_font(*mincho), register_font(*gothic) if _has_bold(ts, lines) else None)
     text_center = ts.margin_left + ts.text_w / 2
     for pg in range(1, pages + 1):
-        c.setFont(c.vadm_fonts[0], FONT_SIZE)
+        c.setFont(c.vamd_fonts[0], FONT_SIZE)
         # 本文の行と表を、上から（文書の順に）描く。PDF の字の並びが文書の順になり、
         # 構文ファイルとの突き合わせ（recover.py）で、表の前後の本文を取り違えない。ヘッダー・フッターの行も
         # 上から描き、ページ番号はページの最後に描く（突き合わせで、余白の字からページ番号を除くため）
@@ -162,7 +162,7 @@ def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTT
         for _, is_table, item in sorted(items, key=lambda t: (t[0], t[1])):
             if is_table:
                 draw_table(c, ts, item, highlight)
-                c.setFont(c.vadm_fonts[0], FONT_SIZE)
+                c.setFont(c.vamd_fonts[0], FONT_SIZE)
                 continue
             y = PAGE_H - ts.line_baseline(item)
             if highlight:
@@ -214,14 +214,14 @@ def _draw_line_numbers(c, ts, lines, page):
     行の字と基準線をそろえる。"""
     rows = sorted({ln.row for ln in lines if ln.page == page and not ln.area}      # ヘッダー・フッターは数えない
                   | {r % ts.lines_page for r in ts.blank_rows if r // ts.lines_page + 1 == page})
-    c.setFont(c.vadm_fonts[0], LINE_NUMBER_SIZE)
+    c.setFont(c.vamd_fonts[0], LINE_NUMBER_SIZE)
     for k, row in enumerate(rows, start=1):
         if k % LINE_NUMBER_STEP == 0:
             # 1つの字の並びとして描く（PDF の字を読むと「10」になるように）。字の間隔で送りを広げる
             s = str(k)
             c.drawString(ts.margin_left - LINE_NUMBER_LAST_X - (len(s) - 1) * LINE_NUMBER_PITCH, PAGE_H - ts.baseline(row), s,
                          charSpace=LINE_NUMBER_PITCH - LINE_NUMBER_SIZE / 2)
-    c.setFont(c.vadm_fonts[0], FONT_SIZE)
+    c.setFont(c.vamd_fonts[0], FONT_SIZE)
 
 
 def _draw_dots(c, items):
@@ -272,7 +272,7 @@ def _clean_and_mark(doc, doc_id, version):
 
 
 def read_id(path):
-    """PDF の識別子から (文書ID, 版) を読み出す。VA DocuMakeの識別子でなければ None を返す。"""
+    """PDF の識別子から (文書ID, 版) を読み出す。VA Documentの識別子でなければ None を返す。"""
     with fitz.open(path) as doc:
         kind, val = doc.xref_get_key(-1, "ID")
     if kind != "array":

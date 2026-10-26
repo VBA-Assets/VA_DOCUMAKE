@@ -6,7 +6,7 @@
 import tkinter as tk
 from tkinter import messagebox
 
-from . import APP_NAME, vadm
+from . import APP_NAME, vamd
 from .dialogs import ChangedOutsideDialog, EditDialog, RegisterDialog
 from .pseudonym import KINDS, NotRegistrable, trim_selection
 
@@ -103,11 +103,11 @@ class AiMixin:
             changes.append(f"元の語を「{old_word}」から「{e.word}」に")
         self.status.configure(text=("、".join(changes) + "変えました。") if changes else "変えていません。")
 
-    def on_copy_vadm(self):
+    def on_copy_vamd(self):
         """構文ファイルの中身をクリップボードに写す（直していれば、先に保存する）。"""
         text = self.real_text()
         saved = ""
-        if self.session.is_modified(text) or self.session.version == 0 or not self.session.vadm_path.exists():
+        if self.session.is_modified(text) or self.session.version == 0 or not self.session.vamd_path.exists():
             if not messagebox.askyesno(APP_NAME, "構文ファイルをコピーする前に、書式付きファイル（PDF）と構文ファイルを保存します。"
                                        "よろしいですか？", parent=self):
                 return
@@ -115,7 +115,7 @@ class AiMixin:
                 return
             # 保存したことも、コピーの知らせと一緒に下の欄に出す（2026-10-26 班長指摘）
             saved = f"版 {self.session.version} を保存し、"
-        data = self.session.vadm_path.read_text(encoding="utf-8")
+        data = self.session.vamd_path.read_text(encoding="utf-8")
         self.clipboard_clear()
         self.clipboard_append(data)
         self.status.configure(text=f"{saved}AI に渡す構文ファイル（仮名化済み）の中身をコピーしました。AI のチャット画面に貼り付けてください。")
@@ -124,7 +124,7 @@ class AiMixin:
         """構文ファイルのフルパスをクリップボードに写す（2026-10-24 班長指示）。保存していなければ写さない。"""
         if not self.session.version:
             return
-        path = str(self.session.vadm_path)
+        path = str(self.session.vamd_path)
         self.clipboard_clear()
         self.clipboard_append(path)
         self.status.configure(text=f"構文ファイルのパスをコピーしました：{path}")
@@ -135,10 +135,10 @@ class AiMixin:
             clip = self.clipboard_get()
         except tk.TclError:
             clip = ""
-        if not vadm.SEPARATOR_RE.search(clip) and "==== VA DocuMake" not in clip:
+        if not vamd.SEPARATOR_RE.search(clip) and "==== VA Document" not in clip:
             messagebox.showinfo(APP_NAME, "クリップボードに AI の回答がありません。\n"
                                 "AI の画面で、回答のコードブロックのコピーボタンを押してから、［貼り付け］を押してください"
-                                "（回答の最初の行に「==== VA DocuMake 文書ID …」の区切りの行が要ります）。", parent=self)
+                                "（回答の最初の行に「==== VA Document 文書ID …」の区切りの行が要ります）。", parent=self)
             return
         self.take_in(clip, "回答")
 
@@ -153,7 +153,7 @@ class AiMixin:
         text = self.real_text()
         try:
             content, r = self.session.review_answer(answer_text, text)
-        except (vadm.NoSeparator, vadm.OtherDocument) as e:
+        except (vamd.NoSeparator, vamd.OtherDocument) as e:
             messagebox.showerror(APP_NAME, f"取り込めません。\n{e}", parent=self)
             return False
         new_text = self.session.apply_answer(content, text)
@@ -195,10 +195,10 @@ class AiMixin:
     def _import_outside(self):
         """外で書き換えられた構文ファイルの中身を、［貼り付け］と同じく取り込み、保存する。"""
         self._declined_stamp = self.session.outside_stamp()
-        return self.take_in(self.session.outside_vadm_text(), "用ファイル（外で書き換えたもの）", check_outside=False)
+        return self.take_in(self.session.outside_vamd_text(), "用ファイル（外で書き換えたもの）", check_outside=False)
 
     def _on_focus_in(self, event=None):
-        """VA DocuMakeの画面に戻ったとき、構文ファイルが外で書き換えられていれば、取り込むかを尋ねる
+        """VA Documentの画面に戻ったとき、構文ファイルが外で書き換えられていれば、取り込むかを尋ねる
         （取り込まないと答えた中身については、もう一度は尋ねない。保存するときには、改めて尋ねる）。"""
         if self._focus_job is None:
             self._focus_job = self.after(300, self._check_outside)
@@ -208,7 +208,7 @@ class AiMixin:
         if self._checking_outside or self.grab_current() is not None:
             return
         try:
-            if not self.session.vadm_changed_outside() or self.session.outside_stamp() == self._declined_stamp:
+            if not self.session.vamd_changed_outside() or self.session.outside_stamp() == self._declined_stamp:
                 return
         except OSError:
             return

@@ -1,7 +1,7 @@
 """構文ファイル（記号入り）と PDF（実名入り）を突き合わせて、対応表を作り直す（仕様.md の7）。
 
 ・PDF から、本文の範囲（上下の余白の内側）の字を、描いた順に取り出して1本の文字列にする
-  （ページ番号は余白にあるので入らない。行の切れ目はつなぐ）。VA DocuMakeは字を文書の順に描く（pdfwriter）。
+  （ページ番号は余白にあるので入らない。行の切れ目はつなぐ）。VA Documentは字を文書の順に描く（pdfwriter）。
 ・構文ファイルの文書を、PDF と同じ並び（見出しの番号＋本文、表はセルの順。配置の記号は除く）の
   1本の文字列にし、記号（〔人名Ａ〕など）は1字の目印（私用領域の字）に置き換える。
 ・2つを difflib で突き合わせ、目印の字に対応する PDF の字の並びを、その記号の元の語とする。同じ記号が
@@ -98,7 +98,7 @@ def pdf_area_text(path, ts, page_number=PAGE_NUMBER_BOTTOM_CENTER):
     return "".join(out), where
 
 
-def vadm_body_text(lines, dt):
+def vamd_body_text(lines, dt):
     """構文ファイルの文書を、PDF と同じ並びの文字列にする。
 
     (文字列, {目印: 記号}, 均等割付の範囲 [(始め, 終わり, 字数)]〔文字列の何字目か〕) を返す。"""
@@ -274,10 +274,10 @@ def _orig_positions(s):
     return out
 
 
-def recover(vadm_lines, pdf_path, dt, page_number=PAGE_NUMBER_BOTTOM_CENTER):
+def recover(vamd_lines, pdf_path, dt, page_number=PAGE_NUMBER_BOTTOM_CENTER):
     """突き合わせて Recovery を返す。page_number は PDF のページ番号の位置（ヘッダー・フッターの字から除くため）。"""
     ts = Typesetter(dt)
-    v_plain, mark_to_token, spans = vadm_body_text(vadm_lines, dt)
+    v_plain, mark_to_token, spans = vamd_body_text(vamd_lines, dt)
     p_plain, where = pdf_body_text(pdf_path, ts)
     area_text, area_where = pdf_area_text(pdf_path, ts, page_number)
     p_plain, where = p_plain + area_text, where + area_where
@@ -346,7 +346,7 @@ def recover(vadm_lines, pdf_path, dt, page_number=PAGE_NUMBER_BOTTOM_CENTER):
 
 
 def rebuild_dictionary(content, pdf_path, doc_type=None):
-    """構文ファイル（vadm.Content）と PDF から、辞書を作り直す。(Dictionary, Recovery) を返す。
+    """構文ファイル（vamd.Content）と PDF から、辞書を作り直す。(Dictionary, Recovery) を返す。
 
     PDF の識別子の文書ID が違えば PdfMismatch を出す。版が違っても突き合わせる（求まらない記号・
     違う語が対応した記号は Recovery に入るので、利用者に尋ねる。違う語が対応した記号は辞書に入れない）。

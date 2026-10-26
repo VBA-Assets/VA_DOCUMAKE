@@ -1,7 +1,7 @@
 """左インデント（+2 。VA公用文の「行間詰め」と同じく、インデントの自動調節の対象外。2026-10-24 班長指示）。"""
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import HEADING, parse
-from va_documake.layout import Typesetter
+from va_document.doctypes import DOC_TYPES
+from va_document.document import HEADING, parse
+from va_document.layout import Typesetter
 
 DT = DOC_TYPES["Saiban"]
 LONG = "長い段落を折り返すと、２行目も同じ位置から始まる。" * 3

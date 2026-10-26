@@ -1,8 +1,8 @@
 """内容証明の字数・行数のチェック（VA内容証明郵便と同じ数え方。2026-10-24 班長指示）。"""
-from va_documake import naiyou
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import parse
-from va_documake.layout import Typesetter
+from va_document import naiyou
+from va_document.doctypes import DOC_TYPES
+from va_document.document import parse
+from va_document.layout import Typesetter
 
 DT = DOC_TYPES[naiyou.DOC_TYPE]
 

@@ -1,10 +1,10 @@
 """太字（**文字**。ＭＳ ゴシックで描く。2026-10-24 班長指示）。"""
 import fitz
 
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import TOC, parse, split_inline
-from va_documake.layout import Typesetter
-from va_documake.pdfwriter import pdf_bytes
+from va_document.doctypes import DOC_TYPES
+from va_document.document import TOC, parse, split_inline
+from va_document.layout import Typesetter
+from va_document.pdfwriter import pdf_bytes
 
 DT = DOC_TYPES["Saiban"]
 
@@ -97,7 +97,7 @@ def test_number_is_bold_when_whole_text_is_bold():
 def test_bold_around_every_mark():
     """配置の記号・-> ・その行だけの記号・セルの配置の記号も、太字の記号で囲んだままで記号として読む
     （「**:=: 準備書面（１）**」など。2026-10-24 班長指示）。"""
-    from va_documake.document import CENTER, PAGE_BREAK, RIGHT, TITLE
+    from va_document.document import CENTER, PAGE_BREAK, RIGHT, TITLE
     paras = parse(["**:=: 準備書面（１）**", "**:-: 中央の行**", "**-> 字下げの段落**", "**<<<**",
                    "**[TOC:2]**", "# 見出し", "| 項目 | 金額 |", "|---|---|", "| 休業損害 | **--: 1,000** |",
                    "**--: 以上**", "**# 右揃えの後は見出しにしない**"], DT)

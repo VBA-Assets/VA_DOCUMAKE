@@ -1,12 +1,12 @@
 """蛍光ペン（==文字==。確認表示だけで黄色に塗り、保存する PDF と印刷には出さない。2026-10-24 班長指示）。"""
 import fitz
 
-from va_documake import config
-from va_documake.doctypes import DOC_TYPES
-from va_documake.document import RIGHT, TITLE, parse, split_inline
-from va_documake.layout import Typesetter
-from va_documake.pdfwriter import pdf_bytes
-from va_documake.session import Session
+from va_document import config
+from va_document.doctypes import DOC_TYPES
+from va_document.document import RIGHT, TITLE, parse, split_inline
+from va_document.layout import Typesetter
+from va_document.pdfwriter import pdf_bytes
+from va_document.session import Session
 
 DT = DOC_TYPES["Saiban"]
 TEXT = ["# 認否", "被告の==主張==は**争う**。", "**==重ねた語==**と==**重ねた語**==。", "a == b のような式は、そのまま。",
@@ -49,7 +49,7 @@ def test_yellow_only_in_preview():
     # 段落の「主張」「重ねた語」×2（字の間も1つにつなげる）、見出し（番号も）、表題、セル2つ
     assert len(rects) == 7
     assert not yellow_rects(pdf_bytes(ts, lines))
-    s = Session(config.AppConfig(vadm_folder="未使用"))
+    s = Session(config.AppConfig(vamd_folder="未使用"))
     assert yellow_rects(s.preview_pdf("\n".join(TEXT), highlight=True))
     assert not yellow_rects(s.preview_pdf("\n".join(TEXT)))
     plain = [(g.ch, round(g.x, 3)) for ln in ts.layout(parse([split_inline(t)[0] for t in TEXT[:4]], DT))
@@ -61,8 +61,8 @@ def test_yellow_only_in_preview():
 def test_triple_equals_is_not_highlight():
     """表の区切りの行（|===|===|）の「==|==」や、= が3つ以上続く所は蛍光ペンの記号とみなさない（2026-10-24、
     エディターで区切りの行の真ん中の | が黄色になった）。"""
-    from va_documake.document import inline_mark_spans
-    for s in ("|===|===|", "|:===|===:|", "a===b===c", "==== VA DocuMake 文書ID K7Q29XMD 版 1 ===="):
+    from va_document.document import inline_mark_spans
+    for s in ("|===|===|", "|:===|===:|", "a===b===c", "==== VA Document 文書ID K7Q29XMD 版 1 ===="):
         assert inline_mark_spans(s) == ([], [], [], []) and split_inline(s)[0] == s
     assert split_inline("**==重ねた語==**")[2] == {0, 1, 2, 3}
     assert split_inline("| ==休業損害== |")[2] == {2, 3, 4, 5}
@@ -71,7 +71,7 @@ def test_triple_equals_is_not_highlight():
 def test_pseudonyms_are_tinted_in_preview_only():
     """確認表示では、仮名化した語の字の地に薄い緑を付ける（本文・表のセル。保存する PDF・印刷には付けない。
     2026-10-24 班長指示）。"""
-    s = Session(config.AppConfig(vadm_folder="未使用"))
+    s = Session(config.AppConfig(vamd_folder="未使用"))
     s.dictionary.register("甲野太郎", "人名")
     text = "# 認否\n甲野太郎の主張は争う。\n| 当事者 | 主張 |\n|---|---|\n| 甲野太郎 | 争う |"
 
