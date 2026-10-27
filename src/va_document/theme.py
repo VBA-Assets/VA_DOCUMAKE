@@ -24,7 +24,7 @@ HIGHLIGHT_BG = "#ffff00"     # 蛍光ペン（==文字==。Word の蛍光ペン�
 # 検索で見つかった語（すべて）と、今選んでいる1か所
 FOUND_BG = PRESSED_BG
 CURRENT_FOUND_BG, CURRENT_FOUND_FG = ACCENT, "#ffffff"
-# AI の回答で変わった段落の、左端の線の太さ（画素）
+# AI の回答で変わった段落の、右端の線の太さ（画素。app.py の changed の印）
 CHANGE_BAR_WIDTH = 4
 # アイコンの塗り（Office の色付きアイコンのように、形の内側を薄い青にする。押せないときは薄い灰色。2026-10-24 班長指示）
 ICON_TINT = "#9cc9f0"

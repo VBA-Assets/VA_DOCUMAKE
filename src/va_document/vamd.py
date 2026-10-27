@@ -13,10 +13,10 @@ import re
 import secrets
 import tempfile
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from .doctypes import DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_LABELS
+from .doctypes import DEFAULT_DOC_TYPE, DOC_TYPES, NAIYOU, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_LABELS, can_one_width
 from .document import (INDENT_MARK, cell_align_mark, is_line_mark, move_wraps_after_marks, parse_separator, split_cells,
                        split_lead_marks)
 from .pseudonym import tokens_in
@@ -89,10 +89,23 @@ class OtherDocument(ValueError):
 
 @dataclass
 class Settings:
-    doc_type: str = "Saiban"                     # DOC_TYPES のキー
+    doc_type: str = DEFAULT_DOC_TYPE             # DOC_TYPES のキー
     page_number: str = PAGE_NUMBER_BOTTOM_CENTER  # PAGE_NUMBER_* のいずれか
     line_numbers: bool = False                   # 行番号を付けるか（2026-10-24 班長指示）
     one_width: bool = False                      # 見出し番号を全角1字の幅に縮めるか（doctypes.one_width_type。2026-10-26 班長指示）
+
+    def allows_line_numbers(self):
+        """行番号を付けられる文書の種類か（内容証明には付けない。2026-10-24 班長指示）。"""
+        return self.doc_type != NAIYOU
+
+    def allows_one_width(self):
+        """見出し番号を1字の幅にできる文書の種類か（契約書1・技術文書ではできない）。"""
+        return can_one_width(DOC_TYPES[self.doc_type])
+
+    def normalized(self):
+        """その文書の種類で使えない行番号・番号1字を外した設定。"""
+        return replace(self, line_numbers=self.line_numbers and self.allows_line_numbers(),
+                       one_width=self.one_width and self.allows_one_width())
 
 
 @dataclass
@@ -143,8 +156,17 @@ def separator_line(doc_id, version, settings):
             f"番号1字 {'あり' if settings.one_width else 'なし'} ====")
 
 
-def parse_separator(line):
-    """区切りの行なら (文書ID, 版, 設定〔なければ None〕) を、そうでなければ None を返す。"""
+def has_separator(text):
+    """文章に、構文ファイルの区切りの行があるか（行ごとに見る）。"""
+    return any(SEPARATOR_RE.match(ln) for ln in text.splitlines())
+
+
+def parse_separator_line(line):
+    """区切りの行なら (文書ID, 版, 設定〔なければ None〕) を、そうでなければ None を返す。
+
+    表の区切りの行（|---|）を読む document.parse_separator とは別の関数（Ver210 までは同じ名前で、こちらが
+    取り込んだ document の関数を隠し、AI の回答の確かめで表の区切りの行の : を配置の記号として数えていた。Ver211 で直した）。
+    """
     m = SEPARATOR_RE.match(line)
     if not m:
         return None
@@ -191,7 +213,7 @@ def parse_text(text):
     at = next((k for k, ln in enumerate(lines) if SEPARATOR_RE.match(ln)), None)
     if at is None:
         raise NoSeparator("区切りの行（「==== VA Document 文書ID …」の行）が見つかりません。")
-    doc_id, version, settings = parse_separator(lines[at])
+    doc_id, version, settings = parse_separator_line(lines[at])
     body, dropped = [], []
     for ln in lines[at + 1:]:
         if FENCE_RE.match(ln):    # コードブロックの閉じの記号。ここから下は AI の結びの文

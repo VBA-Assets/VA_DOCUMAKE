@@ -10,11 +10,13 @@
 ・対になった強調記号（__x__ → x、_x_。記号の直後が半角空白のものと、「_」で前後が英数字のもの〔file_name〕は除く。
   中に改行を含むものは対象外）。**x** は太字、*x* は傍点の記号なので残す（document.py。2026-10-24 班長指示。
   VA公用文は **x** も *x* も取り除く）
-取り除いた数は report に数える（画面で利用者に知らせるため）。
+取り除いた数は report に数える（今は画面には出さず、試験で確かめるのに使う）。
 表の行（| で始まる行）は、水平線の判定の対象外とする（表の区切りの行 |---| を消さないため）。
 """
 import re
 from collections import Counter
+
+from .document import is_table_line
 
 _FENCE_RE = re.compile(r"^\s*```")
 _WIKI_RE = re.compile(r"\[\[([^\[\]\n]+?)\]\]")
@@ -94,7 +96,7 @@ def clean_lines(text):
         lines = lines[end + 1:]
         report["フロントマター"] += 1
     # 水平線（表の行は除く）
-    kept = [(n, l) for n, l in lines if l.lstrip().startswith("|") or not is_horizontal_rule(l)]
+    kept = [(n, l) for n, l in lines if is_table_line(l) or not is_horizontal_rule(l)]
     report["水平線"] += len(lines) - len(kept)
     out, origins = [], []
     for n, line in kept:

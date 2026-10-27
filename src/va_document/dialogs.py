@@ -1,11 +1,10 @@
-"""確認の画面（種別の選択・外で書き換えられた・記号の元の語・内容証明・オプション）。"""
+"""確認の画面（種別の選択・記号と元の語の変更・外で書き換えられた・記号の元の語・内容証明・オプション・AI への指示・
+印刷）。"""
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 from . import APP_NAME, theme
 from .pseudonym import KINDS, NotRegistrable, letters_to_number, make_token, token_label, to_wide
-
-
 
 
 class _Dialog(tk.Toplevel):
@@ -142,7 +141,7 @@ UNREGISTER = "unregister"
 
 
 class EditDialog(_Dialog, _TokenFields):
-    """仮名化した語の記号と元の語を変える（2026-10-25 班長決定）。result は (元の語, 種別, 英字)。
+    """仮名化した語の記号と元の語を変える（2026-10-25 班長決定）。result は (元の語, 種別, 記号の字)。
     画面の下の［解除］で仮名化を解除する（確かめてから。result は UNREGISTER。2026-10-27 班長指示で、一覧の横の
     ［解除］［変更］のボタンをやめ、この画面に移した）。"""
 
@@ -283,7 +282,8 @@ class NaiyouDialog(_Dialog):
 
 class OptionsDialog(_Dialog):
     """オプション（構文ファイルの保存場所、エディターの書体・字の大きさ・行の間隔。2026-10-24 班長指示）。
-    result は {"vamd_folder", "font_family", "font_size", "line_spacing"}（やめたら None）。"""
+    result は {"vamd_folder", "font_family", "font_size", "line_spacing", "prompt"}（prompt は直した AI への指示。
+    直していなければ None。やめたら result が None）。"""
 
     def __init__(self, parent, cfg, font_choices, size_range, spacing_range, prompt, default_prompt):
         super().__init__(parent, "オプション")
@@ -357,7 +357,6 @@ class OptionsDialog(_Dialog):
 
     def accept(self):
         from pathlib import Path
-        from tkinter import messagebox
         folder = self.folder.get().strip()
         if not folder or not Path(folder).is_dir():
             messagebox.showerror("オプション", "構文ファイルの保存場所のフォルダが見つかりません。", parent=self)
@@ -458,7 +457,6 @@ class PrintDialog(_Dialog):
         self.run()
 
     def properties(self):
-        from tkinter import messagebox
         name = self.printer.get()
         if not name:
             return
@@ -471,7 +469,6 @@ class PrintDialog(_Dialog):
             self.modes[name] = mode
 
     def accept(self):
-        from tkinter import messagebox
         from .printing import parse_pages
         name = self.printer.get()
         if not name:

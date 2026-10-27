@@ -93,10 +93,7 @@ class FileMixin:
         if not self._confirm_discard():
             return False
         self.session.new()
-        self._load_text("")
-        self._refresh_dictionary()
-        self._sync_settings_boxes()
-        self._update_title()
+        self._load_text("")             # 設定の欄・仮名化した語の一覧・題も、ここで新しい文書のものにする
         self._layout_pages(keep=False)
         self.status.configure(text="文書を閉じました。新しい文書です。")
         return True
@@ -195,7 +192,7 @@ class FileMixin:
         があれば、PDF に記号のまま出ることを知らせて、保存するかを尋ねる（仮名化した語の記号は、実名に戻してある）。
         返すのは保存する文章（やめたら None）。allow_unknown なら尋ねない（AI の回答の取り込みで、すでに知らせているため）。
         """
-        if any(vamd.SEPARATOR_RE.match(ln) for ln in text.splitlines()):
+        if vamd.has_separator(text):
             messagebox.showerror(APP_NAME, "実名の文章の中に、構文ファイルの区切りの行（==== VA Document …）があります。"
                                  "仮名の文章が紛れ込んでいるおそれがあるため、保存しません。\n\n"
                                  "AI の回答を Ctrl+V で貼り付けた場合は、Ctrl+Z で貼り付ける前に戻してから、"
@@ -273,8 +270,8 @@ class FileMixin:
         try:
             # 印刷の文書の名前は、Word と同じく PDF のファイル名（保存していなければ「VA Document」）。
             # 2026-10-23 班長決定（文書ID にしていたが、Microsoft Print to PDF で作った PDF の題名にもなるため改めた）
-            name = self.session.pdf_path.stem if self.session.pdf_path else APP_NAME
-            n = printing.print_pdf(data, hdc, name, page_list, progress=progress)
+            doc_name = self.session.pdf_path.stem if self.session.pdf_path else APP_NAME
+            n = printing.print_pdf(data, hdc, doc_name, page_list, progress=progress)
         except (printing.PrintError, OSError) as e:
             messagebox.showerror(APP_NAME, f"印刷できませんでした。\n{e}", parent=self)
             self.status.configure(text="印刷できませんでした。")

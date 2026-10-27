@@ -32,7 +32,7 @@ class LayoutMap:
             if not (ln.area and same and same[0].page != ln.page):
                 same.append(ln)
         self.pieces_of_para = defaultdict(list)
-        for piece in getattr(ts, "tables", []):
+        for piece in ts.tables:
             self.pieces_of_para[piece.para_index].append(piece)
 
     # ---------- 共通 ----------
@@ -109,7 +109,7 @@ class LayoutMap:
     def hit(self, page, x, y):
         """確認表示の位置（ページ 0 から、用紙の左上からのポイント）→ エディターの位置 (元の行, 元の字)。"""
         ts = self.ts
-        for piece in getattr(ts, "tables", []):
+        for piece in ts.tables:
             if piece.page - 1 != page:
                 continue
             for row in piece.rows:

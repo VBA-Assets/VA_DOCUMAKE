@@ -1,6 +1,7 @@
 """VA Documentの画面（tkinter・ttk。仕様.md の4）。
 
-・画面のまとめ役。部品（mixin）を混ぜて使う：エディターの操作（editor_ops.py）、確認表示（preview.py）、
+・画面のまとめ役。部品（mixin）を混ぜて使う：エディターの操作（editor_ops.py。カーソルの上の ▼ は editor_mark.py、表のセルは
+  table_ops.py）、確認表示（preview.py）、
   ファイルの操作（file_ops.py：開く・保存・閉じる・印刷）、AI 連携（ai_ops.py：仮名化・コピー・取り込み）。
 ・エディターは常に仮名（記号）で表示し、実名は確認表示で見る（2026-10-24 班長決定）。
 ・確認表示は、組んだ PDF（メモリの中で作る）のページを画像にして表示する。文章を一時ファイルに書かない。
@@ -14,9 +15,9 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from . import APP_NAME, __version__, config, ime, naiyou, printing, theme, tooltip, vamd
+from . import APP_NAME, __version__, config, ime, printing, theme, tooltip, vamd
 from .ai_ops import AiMixin
-from .doctypes import DOC_TYPES, PAGE_NUMBER_LABELS, can_one_width
+from .doctypes import DOC_TYPES, PAGE_NUMBER_LABELS
 from .document import (BULLET_MARK, CENTER_MARK, HEADER_MARK, HEADING_BUTTON_MARK, INDENT_MARK, NUMBER_MARK,
                        PAGE_BREAK_MARK, RIGHT_MARK, SECTION_BREAK_MARK, TITLE_MARK, TOC_MARK)
 from .dialogs import OptionsDialog
@@ -97,6 +98,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self._layout_warning = ""       # 状態の欄に出している、組んだときの知らせ（ヘッダーが本文に重なるなど）
         self._preview_page = 0
         self._page_tops = []
+        self._sash_target = None        # 起動したときに戻す左右の境目の位置（_restore_window）
         self._zoom = None               # None は幅に合わせる
         self._loading = False
         self._last_printer = ""         # 前に印刷したプリンター（起動している間だけ覚える）
@@ -200,9 +202,23 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         （2026-10-23 班長指示）。確認表示のページ送り・表示倍率のボタンは、確認表示の最上部に置く。"""
         self.panes = panes = tk.PanedWindow(self, orient="horizontal", sashwidth=6, bd=0)
         panes.pack(fill="both", expand=True, padx=8, pady=8)
-
-        # ---------- 左：確認表示 ----------
+        # 左：確認表示
         self._preview_pane = preview = ttk.Frame(panes)
+        self._build_preview(preview)
+        panes.add(preview, minsize=300, width=620, stretch="always")
+        # 右：操作と入力欄。下の部品から順に置く（入力欄が残りの高さを使う）。名前の行は、左の PDF の名前の行の高さを
+        # 決めるので、確認表示の後に作る
+        self._work_pane = work = ttk.Frame(panes)
+        panes.add(work, minsize=560, stretch="always")
+        self._build_name_row(work)
+        self._build_ribbon(work)
+        self.status = ttk.Label(work, style="Note.TLabel", padding=(4, 4, 0, 0))
+        self.status.pack(side="bottom", fill="x")
+        self._build_dictionary_list(work)
+        self._build_editor(work)
+
+    def _build_preview(self, preview):
+        """確認表示（PDF の名前、ページ送り・表示倍率・印刷のボタン、ページを並べる canvas）。"""
         # 確認表示の上に PDF のファイル名を出す（エディターの上には構文ファイルの名前。2026-10-24 班長指示）
         # （右の構文ファイルの名前の行は［パスをコピー］の分だけ高いので、組み立てた後で同じ高さにそろえる）
         self._pdf_name_row = ttk.Frame(preview)
@@ -238,14 +254,9 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.canvas.bind("<MouseWheel>", lambda e: self.canvas.yview_scroll(-3 if e.delta > 0 else 3, "units"))
         # 確認表示をクリックすると、その字の位置にエディターのカーソルを動かす（2026-10-23 班長指示）
         self.canvas.bind("<Button-1>", self.on_preview_click)
-        panes.add(preview, minsize=300, width=620, stretch="always")
 
-        # ---------- 右：操作と入力欄 ----------
-        self._work_pane = work = ttk.Frame(panes)
-        panes.add(work, minsize=560, stretch="always")
-        # ボタンは Word のリボンと同じ形にする（組の名前を下に、大小のボタン、重ねたときだけ枠。2026-10-24 班長指示）。
-        # 組の順は、それまでの3段の並び（ファイル・AI 連携／文書の種類・ページ番号・書式／挿入・編集・表示）のとおり。
-        # 大きいボタンは AI 連携だけ（2026-10-24 班長指示）
+    def _build_name_row(self, work):
+        """エディターの側の最上段：構文ファイルの名前と［パスをコピー］。"""
         # 構文ファイルの名前と版は、リボンの上に、確認表示の上の PDF のファイル名と高さをそろえて出す（2026-10-24 班長指示）
         # 名前の右に［パスをコピー］（構文ファイルのフルパスをコピーする。Claude Code に「このファイルを直して」と渡す、
         # Claude の添付の画面の「ファイル名」の欄に貼る、などに使う。2026-10-24 班長指示）
@@ -261,30 +272,38 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self._pdf_name_row.configure(height=self.copy_path_button.winfo_reqheight() + 4)
         self._pdf_name_row.pack_propagate(False)
         name_row.bind("<Configure>", lambda e: self._pdf_name_row.configure(height=e.height), add="+")
+
+    def _build_ribbon(self, work):
+        """リボン。ボタンは Word のリボンと同じ形にする（組の名前を下に、大小のボタン、重ねたときだけ枠。2026-10-24
+        班長指示）。組の順は、それまでの3段の並び（ファイル・AI 連携／文書の種類・ページ番号・書式／挿入・編集・表示）
+        のとおり。大きいボタンは AI 連携だけ（2026-10-24 班長指示）。"""
         self.ribbon = rb = Ribbon(work, self.icons)
         # リボンの下に境界線は引かない（上にないので、下だけだと釣り合わない。2026-10-24 班長指示）
         rb.pack(fill="x", pady=(0, 4))
+        # ボタンのアイコンは、ボタンの字から icons.BUTTON_ICONS で引く（ribbon.py）
         g = rb.group("ファイル")
-        g.small("開く", self.on_open, "folder_open")
+        g.small("開く", self.on_open)
         # ［保存］は、いつも同じ見た目にする（保存していない変更があるときの青い枠は、2026-10-26 に外した。班長決定。
         # 保存していない変更は題の「＊」で示し、閉じる・開く・印刷・コピーの前に保存する〔尋ねる〕）
-        self.save_button = g.small("保存", self.on_save, "save")
+        self.save_button = g.small("保存", self.on_save)
         # ［閉じる］は今の文書を閉じて新しい文書にする（VA Document は終わらない）。［オプション］は構文ファイルの
         # 保存場所とエディターの見た目（2026-10-24 班長指示）
-        g.small("閉じる", self.on_close_document, "document_dismiss")
+        g.small("閉じる", self.on_close_document)
         # 過去の文書を使い回す［コピーとして開く］［名前を付けて保存］は置かない（2026-10-25 班長決定。仕様.md の9.4）
-        g.small("オプション", self.on_options, "settings")
+        g.small("オプション", self.on_options)
         # 仮名化・コピー・貼り付けは一連の操作なので、1つの組にし、「ファイル」のすぐ右に置く（2026-10-23 班長指示）。
         # ［選択範囲を仮名化］は大きいボタン、［コピー］［貼り付け］はその右に積む小さいボタンにする（2026-10-24・25 班長指示）
         g = rb.group("AI 連携")
-        self.register_button = g.large("選択範囲を\n仮名化", self.on_register, "person_lock")
-        g.small("コピー", self.on_copy_vamd, "copy")
-        g.small("貼り付け", self.on_import, "clipboard_paste")
-        # 文書の種類・ページ番号の選択欄と、行番号・番号1字のチェックは「スタイル」の組、文字列に記号を付けるボタンは
+        self.register_button = g.large("選択範囲を\n仮名化", self.on_register)
+        g.small("コピー", self.on_copy_vamd)
+        g.small("貼り付け", self.on_import)
+        # 文書の種類・ページ番号の選択欄と、行番号・番号1字のチェックは「レイアウト」の組、文字列に記号を付けるボタンは
         # 「書式」の組にする（2026-10-25 班長指示で1つの「書式」の組から分け、2026-10-27 班長指示で［見出し］［箇条書き］
-        # ［段落番号］を「スタイル」から「書式」の左端の列に移した）。選択欄の左端をそろえる。［左］は置かない。
+        # ［段落番号］を「スタイル」から「書式」の左端の列に移した）。組の名前は、見出しなどを移した後の中身に合わせて、
+        # 「スタイル」から Word のタブの名前の「レイアウト」に改めた（行番号・余白などのページ設定がある。挿入・表示と
+        # 同じくタブの名前を使う。2026-10-27 班長決定）。選択欄の左端をそろえる。［左］は置かない。
         # 同じボタンをもう一度押すと解除する（2026-10-23・24 班長指示）
-        g = rb.group("スタイル")
+        g = rb.group("レイアウト")
         frame, (self.doc_type_box, self.page_number_box) = labeled_rows(g.body, [
             ("文書の種類", lambda m: ttk.Combobox(m, state="readonly", width=16,
                                                 values=[d.label for d in DOC_TYPES.values()])),
@@ -307,41 +326,36 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.doc_type_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
         self.page_number_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
         # 「書式」の組：左端の列に［見出し］［箇条書き］［段落番号］を上から順に置き（見出しは ## で付け、レベルは
-        # エディターで # の数を直す。2026-10-25 班長指示。2026-10-27 に「スタイル」から移した）、その右の列に
+        # エディターで # の数を直す。2026-10-25 班長指示。2026-10-27 に「スタイル」〔今の「レイアウト」〕から移した）、その右の列に
         # ［太字］［傍点］［均等割付］を上から順に置き（2026-10-24 班長指示）、その右に配置のボタン
         g = rb.group("書式")
-        for label, mark, icon in (("見出し", HEADING_BUTTON_MARK, "text_header_2"),
-                                  ("箇条書き", BULLET_MARK, "text_bullet_list_ltr"),
-                                  ("段落番号", NUMBER_MARK, "text_number_list_ltr")):
-            g.small(label, lambda m=mark: self.on_paragraph_kind(m), icon)
-        g.small("太字", self.on_bold, "text_bold")
-        g.small("傍点", self.on_dots, "text_emphasis")
-        g.small("均等割付", self.on_distribute, "text_align_distributed")
-        for label, mark, icon in (("表題", TITLE_MARK, "document_title"), ("中央", CENTER_MARK, "text_align_center"),
-                                  ("右", RIGHT_MARK, "text_align_right"), ("字下げ", INDENT_MARK, "text_first_line")):
-            g.small(label, lambda m=mark: self.on_align(m), icon)
+        for label, mark in (("見出し", HEADING_BUTTON_MARK), ("箇条書き", BULLET_MARK), ("段落番号", NUMBER_MARK)):
+            g.small(label, lambda m=mark: self.on_paragraph_kind(m))
+        g.small("太字", self.on_bold)
+        g.small("傍点", self.on_dots)
+        g.small("均等割付", self.on_distribute)
+        for label, mark in (("表題", TITLE_MARK), ("中央", CENTER_MARK), ("右", RIGHT_MARK), ("字下げ", INDENT_MARK)):
+            g.small(label, lambda m=mark: self.on_align(m))
         # ［インデント］は［字下げ］の下に置く（2026-10-24 班長指示）
-        g.small("インデント", self.on_indent, "text_indent_increase")
+        g.small("インデント", self.on_indent)
         # ［ヘッダー］は、選んだ行の行頭に [HEADER] を付け外しする。配置のボタンと同じく行頭の記号を付け外しするので、
         # ［インデント］の下に置く。フッターはほぼ使わないのでボタンを置かず、[FOOTER] は手で書く（2026-10-25 班長指示）
-        g.small("ヘッダー", lambda: self.on_area(HEADER_MARK), "document_header")
+        g.small("ヘッダー", lambda: self.on_area(HEADER_MARK))
         # 1行あけるのは、エディターの空の行で行う（Word と同じ。［空行］は置かない。2026-10-23 班長決定）
         g = rb.group("挿入")
-        for label, mark, icon in (("改ページ", PAGE_BREAK_MARK, "document_page_break"),
-                                  ("セクション区切り", SECTION_BREAK_MARK, "document_split_hint"),
-                                  ("目次", TOC_MARK, "text_bullet_list_square")):   # 載せる見出しのレベルは手で直す（2026-10-24）
-            g.small(label, lambda m=mark: self.on_line_mark(m), icon)
+        for label, mark in (("改ページ", PAGE_BREAK_MARK), ("セクション区切り", SECTION_BREAK_MARK),
+                            ("目次", TOC_MARK)):   # 載せる見出しのレベルは手で直す（2026-10-24）
+            g.small(label, lambda m=mark: self.on_line_mark(m))
         # 検索・置換は「編集」の組にする（Word のリボンのホームのタブと同じ名前。2026-10-23 班長決定）
         g = rb.group("編集")
-        g.small("検索", lambda: self.on_find(False), "search")
-        g.small("置換", lambda: self.on_find(True), "arrow_swap")
+        g.small("検索", lambda: self.on_find(False))
+        g.small("置換", lambda: self.on_find(True))
         # 蛍光ペンは「表示」の組にして、「編集」の右に置く（確認表示だけに出し、PDF・印刷には出さない。2026-10-24 班長指示）
         g = rb.group("表示")
-        g.small("蛍光ペン", self.on_highlight, "highlight")
+        g.small("蛍光ペン", self.on_highlight)
 
-        # 下から順に置く（入力欄が残りの高さを使う）
-        self.status = ttk.Label(work, style="Note.TLabel", padding=(4, 4, 0, 0))
-        self.status.pack(side="bottom", fill="x")
+    def _build_dictionary_list(self, work):
+        """仮名化した語の一覧（エディターの下。下の状態の欄の上）。"""
         bottom = ttk.Frame(work, padding=(4, 6, 0, 0))
         bottom.pack(side="bottom", fill="x")
         # 一覧の題の右に、変え方を添える（［解除］［変更］のボタンは置かず、行のダブルクリックで開く変更の画面で
@@ -366,6 +380,8 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # ［すべて解除］は、押すと構文ファイルが実名だらけになるので置かない）
         self.tree.bind("<Double-Button-1>", lambda e: self.on_edit_entry() if self.tree.identify_row(e.y) else None)
 
+    def _build_editor(self, work):
+        """エディター（入力欄）と、記号・太字・検索などの色付けの設定。"""
         # エディターは常に仮名（記号）で表示し、実名は確認表示で見る（実名・仮名の切り替えはなくした。2026-10-24 班長決定）
         editor = ttk.Frame(work, padding=(4, 0, 0, 0))
         editor.pack(fill="both", expand=True)
@@ -460,27 +476,23 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         labels = {d.label: d.key for d in DOC_TYPES.values()}
         pages = {v: k for k, v in PAGE_NUMBER_LABELS.items()}
         doc_type = labels[self.doc_type_box.get()]
-        line_numbers = self.line_numbers_var.get() and doc_type != naiyou.DOC_TYPE     # 内容証明には付けない
-        one_width = self.one_width_var.get() and can_one_width(DOC_TYPES[doc_type])
-        self.session.settings = vamd.Settings(doc_type, pages[self.page_number_box.get()], line_numbers, one_width)
+        self.session.settings = vamd.Settings(doc_type, pages[self.page_number_box.get()], self.line_numbers_var.get(),
+                                              self.one_width_var.get()).normalized()
         self._sync_settings_boxes()
         # 次に起動したときの新しい文書も、この設定で始める（2026-10-23 班長指示）
-        s = self.session.settings
-        self.cfg.doc_type, self.cfg.page_number, self.cfg.line_numbers = s.doc_type, s.page_number, s.line_numbers
-        self.cfg.one_width = s.one_width
+        self.cfg.remember_settings(self.session.settings)
         config.save(self.cfg)
         self._update_title()
         self.refresh()
 
     def _sync_settings_boxes(self):
+        s = self.session.settings
         self.doc_type_box.set(self.session.doc_type.label)
-        self.page_number_box.set(PAGE_NUMBER_LABELS[self.session.settings.page_number])
-        self.line_numbers_var.set(self.session.settings.line_numbers)
-        self.line_numbers_check.configure(
-            state="disabled" if self.session.settings.doc_type == naiyou.DOC_TYPE else "normal")
-        self.one_width_var.set(self.session.settings.one_width)
-        self.one_width_check.configure(
-            state="normal" if can_one_width(DOC_TYPES[self.session.settings.doc_type]) else "disabled")
+        self.page_number_box.set(PAGE_NUMBER_LABELS[s.page_number])
+        self.line_numbers_var.set(s.line_numbers)
+        self.line_numbers_check.configure(state="normal" if s.allows_line_numbers() else "disabled")
+        self.one_width_var.set(s.one_width)
+        self.one_width_check.configure(state="normal" if s.allows_one_width() else "disabled")
 
     # ---------- ウィンドウの大きさ・位置（前回終了したときに戻す。2026-10-23 班長指示） ----------
 
@@ -506,7 +518,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.bind("<Configure>", self._on_window_configure, add="+")
 
     def _place_sash(self, event=None):
-        if getattr(self, "_sash_target", None) is None or time.monotonic() > self._sash_until:
+        if self._sash_target is None or time.monotonic() > self._sash_until:
             self._sash_target = None
             return
         try:
@@ -530,9 +542,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         except tk.TclError:
             pass
         # 文書の種類・ページ番号も覚える（次に起動したときの新しい文書は、この設定で始める。2026-10-23 班長指示）
-        s = self.session.settings
-        cfg.doc_type, cfg.page_number, cfg.line_numbers = s.doc_type, s.page_number, s.line_numbers
-        cfg.one_width = s.one_width
+        cfg.remember_settings(self.session.settings)
 
     def on_options(self):
         """オプション（構文ファイルの保存場所、エディターの書体・字の大きさ・行の間隔。2026-10-24 班長指示）。"""

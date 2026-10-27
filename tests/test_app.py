@@ -9,9 +9,9 @@ tk = pytest.importorskip("tkinter")
 
 from tkinter import messagebox  # noqa: E402
 
-from va_document import ai_ops, app, config, editor_ops, file_ops, theme, vamd  # noqa: E402
+from va_document import ai_ops, app, config, editor_mark, file_ops, theme, vamd  # noqa: E402
 from va_document.pdfwriter import read_id  # noqa: E402
-from va_document.editor_ops import EDITOR_MARK_WATCH_MS  # noqa: E402
+from va_document.editor_mark import EDITOR_MARK_WATCH_MS  # noqa: E402
 
 TEXT = "原告　甲野太郎\n:=: 準備書面（１）\n# 認否\n甲野太郎の主張は争う。\n"
 PSEUDO = TEXT.replace("甲野太郎", "〔人名Ａ〕")      # エディターは常に仮名（2026-10-24 班長決定）
@@ -322,20 +322,22 @@ def test_ribbon_groups_and_reflow(window):
     狭いときは、入らない組を次の段に送る（2026-10-24 班長指示）。"""
     rb = window.ribbon
     titles = [str(g.grid_slaves(row=1, column=0)[0].cget("text")) for g in rb.groups]
-    assert titles == ["ファイル", "AI 連携", "スタイル", "書式", "挿入", "編集", "表示"]
-    # 文書の種類・ページ番号の選択欄は「スタイル」の組にあり、左端がそろう（2026-10-25 に「書式」から分けた）
+    assert titles == [g.title for g in rb.groups]
+    assert titles == ["ファイル", "AI 連携", "レイアウト", "書式", "挿入", "編集", "表示"]
+    # 文書の種類・ページ番号の選択欄は「レイアウト」の組にあり、左端がそろう（2026-10-25 に「書式」から分け、
+    # 2026-10-27 に組の名前を「スタイル」から改めた）
     window.update_idletasks()
     assert window.doc_type_box.winfo_x() == window.page_number_box.winfo_x()
     w = window.doc_type_box
     while w is not None and w not in rb.groups:
         w = w.master
-    assert w is rb.groups[2]
-    # 「スタイル」は選択欄とチェックだけ、文字列に記号を付けるボタンは「書式」（2026-10-25 班長指示）。［見出し］
+    assert w is _group(window, "レイアウト")
+    # 「レイアウト」は選択欄とチェックだけ、文字列に記号を付けるボタンは「書式」（2026-10-25 班長指示）。［見出し］
     # ［箇条書き］［段落番号］は「書式」の左端の列、その右の列に［太字］［傍点］［均等割付］（2026-10-27 班長指示）
     found = {str(b.cget("text")): b for b in _all_buttons(window)}
-    assert not any(b.master is rb.groups[2].body for b in found.values())
+    assert not any(b.master is _group(window, "レイアウト").body for b in found.values())
     for text in ("見出し", "箇条書き", "段落番号", "太字", "傍点", "均等割付", "表題"):
-        assert found[text].master is rb.groups[3].body, text
+        assert found[text].master is _group(window, "書式").body, text
     cells = {t: (int(found[t].grid_info()["column"]), int(found[t].grid_info()["row"]))
              for t in ("見出し", "箇条書き", "段落番号", "太字", "傍点", "均等割付")}
     assert cells == {"見出し": (0, 0), "箇条書き": (0, 1), "段落番号": (0, 2), "太字": (1, 0), "傍点": (1, 1), "均等割付": (1, 2)}
@@ -387,7 +389,7 @@ def _canvas_point(window, line, col):
 
 def test_editor_and_preview_are_linked(window, monkeypatch):
     """エディターのカーソル → 確認表示のページ、確認表示のクリック → エディターのカーソル。"""
-    monkeypatch.setattr(editor_ops, "EDITOR_MARK_BLINK_MS", 0)     # ▼ の点滅は別の試験で確かめる
+    monkeypatch.setattr(editor_mark, "EDITOR_MARK_BLINK_MS", 0)     # ▼ の点滅は別の試験で確かめる
     window.deiconify()
     window.geometry("1200x800")
     text = (Path(__file__).parent / "data" / "長い文書" / "見本.md").read_text(encoding="utf-8")
@@ -473,8 +475,8 @@ def test_editor_and_preview_are_linked(window, monkeypatch):
 def test_editor_mark_blinks_when_caret_moves(window, monkeypatch):
     """カーソルを動かしたときは ▼ を点滅させてから出したままにし、字を打ったときは点滅させない。確認表示の ▼ も
     同時に点滅させる（2026-10-26 班長指示）。"""
-    monkeypatch.setattr(editor_ops, "EDITOR_MARK_BLINK_MS", 400)
-    monkeypatch.setattr(editor_ops, "EDITOR_MARK_BLINK_STEP_MS", 50)
+    monkeypatch.setattr(editor_mark, "EDITOR_MARK_BLINK_MS", 400)
+    monkeypatch.setattr(editor_mark, "EDITOR_MARK_BLINK_STEP_MS", 50)
     window.deiconify()
     window.geometry("1200x800")
     window.update()
@@ -626,7 +628,6 @@ def test_print_to_pdf_printer(window, tmp_path, monkeypatch, quiet_faulthandler)
     for _ in range(50):
         if out.exists() and out.stat().st_size:
             break
-        import time
         time.sleep(0.2)
     with fitz.open(out) as doc:
         assert len(doc) >= 1 and abs(doc[0].rect.width - 595.3) < 1 and abs(doc[0].rect.height - 841.9) < 1
@@ -638,9 +639,20 @@ def _lines(window, a, b):
     return [window.text.get(f"{n}.0", f"{n}.end") for n in range(a, b + 1)]
 
 
+def _focus_editor(window):
+    """エディターにキーボードの焦点を移す。event_generate のキーは焦点のある部品にだけ届き、隠した画面は焦点を
+    持てないので、画面を出してから移す（2026-10-27。それまでは前の試験が画面を出したままにしているのに頼っていて、
+    単独で走らせると落ち、全体でも Windows が焦点を渡さなかった回に落ちた）。"""
+    window.deiconify()
+    window.update()
+    window.text.focus_force()
+    window.update()
+    assert window.focus_get() is window.text, "エディターがキーボードの焦点を得られなかった（ほかの画面を操作中など）"
+
+
 def test_word_shortcuts(window, monkeypatch):
     """Word と同じショートカットキー（Ctrl+E・Ctrl+R・Ctrl+Enter）と、Tk のもとのキーを外したこと。"""
-    window.text.focus_force()
+    _focus_editor(window)
     window.text.mark_set("insert", "4.2")
     window.text.event_generate("<Control-Key-e>")
     assert _lines(window, 4, 4) == [":-: 〔人名Ａ〕の主張は争う。"]
@@ -665,7 +677,7 @@ def test_word_shortcuts(window, monkeypatch):
 def test_outline_level_and_plain(window):
     """Alt+Shift+←／→ で見出しのレベルを上げ下げし、Ctrl+Shift+N で標準の本文にする（Word と同じ）。"""
     window._load_text("# 第一\n## 第二\n本文\n- 項目\n--: 以上")
-    window.text.focus_force()
+    _focus_editor(window)
     window.text.mark_set("insert", "2.0")
     window.text.event_generate("<Alt-Shift-Left>")
     assert _lines(window, 2, 2) == ["# 第二"]
@@ -811,12 +823,7 @@ def test_buttons_have_icons(window):
 
     def buttons(w):
         # メインの画面のボタンだけ（検索と置換などの別の画面〔Toplevel〕は見ない）
-        for c in w.winfo_children():
-            if isinstance(c, tk.Toplevel):
-                continue
-            if isinstance(c, ttk.Button):
-                yield c
-            yield from buttons(c)
+        return _widgets(w, ttk.Button, skip_toplevel=True)
     found = {str(b.cget("text")).replace("\n", ""): b for b in buttons(window)}
     for text in ("開く", "保存", "印刷", "閉じる", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "字下げ", "インデント", "太字", "均等割付",
                  "見出し", "箇条書き", "段落番号", "改ページ", "セクション区切り", "ヘッダー", "検索", "置換", "蛍光ペン", "幅に合わせる"):
@@ -859,16 +866,12 @@ def test_buttons_have_tooltips(window):
     names = {v: k for k, v in icons.ICON_ONLY.items()}
 
     def labels(w):
-        for c in w.winfo_children():
-            if isinstance(c, tk.Toplevel):
-                continue
-            if isinstance(c, (tk.ttk.Button, tk.ttk.Radiobutton, tk.Checkbutton)):
-                text = str(c.cget("text")).replace("\n", "")
-                if not text:
-                    image = str(c.cget("image")).split()
-                    text = next((k for n, k in names.items() for i in image if n in i), "")
-                yield text, c
-            yield from labels(c)
+        for c in _widgets(w, (tk.ttk.Button, tk.ttk.Radiobutton, tk.Checkbutton), skip_toplevel=True):
+            text = str(c.cget("text")).replace("\n", "")
+            if not text:
+                image = str(c.cget("image")).split()
+                text = next((k for n, k in names.items() for i in image if n in i), "")
+            yield text, c
     missing = [text for text, c in labels(window) if text and text not in tooltip.TIPS]
     assert not missing, missing
     assert tooltip.TIPS["ヘッダー"] in tips
@@ -933,14 +936,7 @@ def test_toc_button_and_preview_link(window):
     目次の行をクリックしても連動が崩れない。"""
     window._load_text("# 第一\n本文\n# 第二\n本文")
     window.text.mark_set("insert", "1.0")
-    from tkinter import ttk
-
-    def buttons(w):
-        for c in w.winfo_children():
-            if isinstance(c, ttk.Button):
-                yield c
-            yield from buttons(c)
-    next(b for b in buttons(window.ribbon) if str(b.cget("text")) == "目次").invoke()
+    next(b for b in _all_buttons(window.ribbon) if str(b.cget("text")) == "目次").invoke()
     assert _lines(window, 1, 2) == ["[TOC:3]", "# 第一"]
     window.refresh()
     ranges = window.text.tag_ranges("mark")
@@ -1085,6 +1081,7 @@ def test_indent_button_and_shortcuts(window):
     window.text.mark_set("insert", "1.1")
     window.on_indent()                                   # 見出しの行には付けない
     assert window.text.get("1.0", "1.end") == "# 認否"
+    _focus_editor(window)
     window.text.mark_set("insert", "3.2")
     window.text.event_generate("<Control-Key-i>")
     assert window.text.get("3.0", "3.end") == "次の段落。"         # Ctrl+I で外れる。タブは入らない
@@ -1103,7 +1100,7 @@ def test_header_footer_buttons(window):
     # ［ヘッダー］は「書式」の組の［インデント］の下（2026-10-25 班長指示）
     found = {str(b.cget("text")): b for b in _all_buttons(window)}
     head, indent = found["ヘッダー"], found["インデント"]
-    assert head.master is indent.master is window.ribbon.groups[3].body
+    assert head.master is indent.master is _group(window, "書式").body
     assert head.grid_info()["column"] == indent.grid_info()["column"]
     assert int(head.grid_info()["row"]) == int(indent.grid_info()["row"]) + 1
     window._load_text("--: 事件番号\n担当\n# 認否\n主張は争う。")
@@ -1134,12 +1131,23 @@ def test_header_footer_buttons(window):
         ("footer", "担当"), ("header", "事件番号")]
 
 
-def _all_buttons(w):
-    from tkinter import ttk
-    for c in w.winfo_children():
-        if isinstance(c, ttk.Button):
+def _widgets(root, cls, skip_toplevel=False):
+    """root の下の cls の部品を、すべて返す。skip_toplevel なら、別の画面（検索と置換など）の中は見ない。"""
+    for c in root.winfo_children():
+        if skip_toplevel and isinstance(c, tk.Toplevel):
+            continue
+        if isinstance(c, cls):
             yield c
-        yield from _all_buttons(c)
+        yield from _widgets(c, cls, skip_toplevel)
+
+
+def _all_buttons(w):
+    return _widgets(w, tk.ttk.Button)
+
+
+def _group(window, title):
+    """リボンの組を、名前で引く。"""
+    return next(g for g in window.ribbon.groups if g.title == title)
 
 
 def test_header_overflow_is_shown_in_status(window):
@@ -1423,7 +1431,7 @@ def test_print_dialog_choices(window):
     assert results == [("B", None, 1, [0, 1, 2, 3, 4, 5]), ("B", None, 3, [1]), ("A", None, 1, [0, 1, 5])]
 
 def test_line_numbers_check(window, tmp_path):
-    """「スタイル」の［行番号］のチェックで行番号を付ける。構文ファイルの区切りの行に残し、内容証明では付けない
+    """「レイアウト」の［行番号］のチェックで行番号を付ける。構文ファイルの区切りの行に残し、内容証明では付けない
     （VA公用文のセットアップと同じ。2026-10-24 班長指示）。"""
     from va_document.doctypes import DOC_TYPES
     assert not window.line_numbers_var.get()
@@ -1441,7 +1449,7 @@ def test_line_numbers_check(window, tmp_path):
     assert str(window.line_numbers_check.cget("state")) == "normal" and not window.session.settings.line_numbers
 
 def test_one_width_check(window, tmp_path):
-    """「スタイル」の［番号1字］のチェックで、見出し番号を全角1字の幅に縮める。構文ファイルの区切りの行に残し、
+    """「レイアウト」の［番号1字］のチェックで、見出し番号を全角1字の幅に縮める。構文ファイルの区切りの行に残し、
     契約書1・技術文書では使えない（2026-10-26 班長指示）。"""
     from va_document.doctypes import DOC_TYPES
     window.text.delete("1.0", "end")
@@ -1490,14 +1498,7 @@ def test_copy_vamd_path(window, tmp_path):
 def test_no_commands_for_reusing_documents(window):
     """過去の文書を使い回す［コピーとして開く］［名前を付けて保存］（F12）と、［すべて解除］は置かない
     （2026-10-25 班長決定。仕様.md の9.4）。"""
-    from tkinter import ttk
-
-    def texts(w):
-        for c in w.winfo_children():
-            if isinstance(c, ttk.Button):
-                yield str(c.cget("text")).replace("\n", "")
-            yield from texts(c)
-    found = set(texts(window))
+    found = {str(b.cget("text")).replace("\n", "") for b in _all_buttons(window)}
     assert "開く" in found and not found & {"変更", "解除"}       # 一覧の横の［解除］［変更］も置かない（2026-10-27 班長指示）
     assert not found & {"コピーとして開く", "名前を付けて保存", "すべて解除"}
     assert not window.bind("<F12>")
@@ -1600,12 +1601,7 @@ def test_edit_dialog_unregisters(window, monkeypatch):
     from tkinter import ttk
     from va_document.dialogs import UNREGISTER, EditDialog
 
-    def labels(w):
-        for c in w.winfo_children():
-            if isinstance(c, ttk.Label):
-                yield str(c.cget("text"))
-            yield from labels(c)
-    assert "（ダブルクリックで編集）" in set(labels(window))
+    assert "（ダブルクリックで編集）" in {str(c.cget("text")) for c in _widgets(window, ttk.Label)}
     d = window.session.dictionary                     # 甲野太郎＝〔人名Ａ〕
     answers, asked = iter([False, True]), []
     monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(a[1]) or next(answers))

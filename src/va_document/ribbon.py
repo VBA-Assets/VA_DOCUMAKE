@@ -11,6 +11,8 @@
 """
 from tkinter import ttk
 
+from .icons import BUTTON_ICONS
+
 ROWS = 3                # 小さいボタンを縦に積む数
 LARGE_ICON = 32         # 大きいボタンのアイコンの大きさ（拡大率 100% のとき。画素）
 
@@ -20,6 +22,7 @@ class RibbonGroup(ttk.Frame):
 
     def __init__(self, master, title, icons):
         super().__init__(master, style="Ribbon.TFrame")
+        self.title = title
         self.icons = icons
         self.body = ttk.Frame(self, style="Ribbon.TFrame")
         self.body.grid(row=0, column=0, sticky="nsew", padx=2, pady=(2, 0))
@@ -30,7 +33,9 @@ class RibbonGroup(ttk.Frame):
         self._column = -1
         self._row = ROWS          # 今の列に積んだ数（ROWS なら次は新しい列）
 
-    def _images(self, icon, large):
+    def _images(self, text, icon, large):
+        """ボタンのアイコンの指定。icon を省けば、ボタンの字（改行を除く）から BUTTON_ICONS で引く。"""
+        icon = icon or BUTTON_ICONS.get(text.replace("\n", ""))
         if self.icons is None or not icon:
             return {}
         size = round(LARGE_ICON * self.icons.scale) if large else None
@@ -43,24 +48,20 @@ class RibbonGroup(ttk.Frame):
         self._column += 1
         self._row = ROWS
         b = ttk.Button(self.body, text=text, command=command, style="RibbonLarge.TButton",
-                       **self._images(icon, True), **kw)
+                       **self._images(text, icon, True), **kw)
         b.grid(row=0, column=self._column, rowspan=ROWS, sticky="ns", padx=1)
         return b
 
-    def small(self, text, command, icon=None, new_column=False, **kw):
+    def small(self, text, command, icon=None, **kw):
         """小さいボタン（アイコンの右に字）。今の列に縦に積み、ROWS 個で次の列へ。"""
         widget = ttk.Button(self.body, text=text, command=command, style="Ribbon.TButton",
-                            **self._images(icon, False), **kw)
-        self.place_small(widget, new_column)
-        return widget
-
-    def place_small(self, widget, new_column=False, sticky="w"):
-        """ほかの部品（ラベル付きの選択欄など）を、小さいボタンと同じく列に積む。"""
-        if new_column or self._row >= ROWS:
+                            **self._images(text, icon, False), **kw)
+        if self._row >= ROWS:
             self._column += 1
             self._row = 0
-        widget.grid(in_=self.body, row=self._row, column=self._column, sticky=sticky, padx=1, pady=0)
+        widget.grid(in_=self.body, row=self._row, column=self._column, sticky="w", padx=1, pady=0)
         self._row += 1
+        return widget
 
     def block(self, widget):
         """部品（選択欄の並びなど）を、新しい列の上から置く。"""

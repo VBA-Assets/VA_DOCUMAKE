@@ -14,9 +14,10 @@ VA Documentの「内容証明」は1行19字・26行の格子で組むので、�
 from collections import defaultdict
 from dataclasses import dataclass
 
+from .doctypes import NAIYOU
 from .layout import FONT_SIZE
 
-DOC_TYPE = "Naiyou"      # 文書の種類「内容証明」（doctypes.DOC_TYPES のキー）
+DOC_TYPE = NAIYOU        # 文書の種類「内容証明」（doctypes.DOC_TYPES のキー）
 MAX_CHARS = 20
 MAX_LINES = 26
 NOT_COUNTED = set(" 　）)")
@@ -55,7 +56,7 @@ def check(ts, lines):
         text = "".join(g.ch for g in ln.glyphs)
         pages[ln.page].append((ts.baseline(ln.row), [text], ts.margin_left + ln.glyphs[0].x + 1,
                                top + ts.line_pitch / 2))
-    for piece in getattr(ts, "tables", []):
+    for piece in ts.tables:
         rows = defaultdict(lambda: defaultdict(list))      # 基準線 → 列 → 字
         for g in piece.glyphs:
             rows[round(g.y, 2)][g.col].append(g)

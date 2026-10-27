@@ -78,7 +78,8 @@ DOC_TYPES = {d.key: d for d in (
             (0,) * 9, (0,) * 9, (0,) * 9, (0,) * 9, 0, TITLE_LEFT, 0,
             list_bullet="-", list_number="%1)", list_number_style="alpha", list_left=0, list_first=0),
 )}
-
+DEFAULT_DOC_TYPE = "Saiban"   # 既定の文書の種類（裁判所提出書類）
+NAIYOU = "Naiyou"             # 内容証明（行番号・ヘッダー・フッターを付けない。naiyou.py の確かめをする）
 
 
 def can_one_width(dt):

@@ -18,7 +18,8 @@ ICON_DIR = Path(__file__).resolve().parent / "icons"
 ICON_SIZE = 16          # 拡大率 100% のときの大きさ（画素）
 SVG_FILL = "#212121"
 
-# ボタンの字 → アイコンのファイル名（icons\<名前>.svg）
+# ボタンの字 → アイコンのファイル名（icons\<名前>.svg）。リボンのボタン（ribbon.py。字の改行は除いて引く）も、
+# ほかの画面のボタン（decorate）も、ここで引く
 BUTTON_ICONS = {
     "開く": "folder_open", "保存": "save", "印刷": "print", "閉じる": "document_dismiss", "オプション": "settings",
     "選択範囲を仮名化": "person_lock", "コピー": "copy", "貼り付け": "clipboard_paste",

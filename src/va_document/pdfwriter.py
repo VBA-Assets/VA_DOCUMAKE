@@ -22,8 +22,7 @@ from reportlab.pdfgen import canvas
 
 from .doctypes import (FW_DIGITS, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED,
                        PAGE_NUMBER_BOTTOM_RIGHT, PAGE_NUMBER_NONE, PAGE_NUMBER_TOP_RIGHT)
-from .layout import (DOT_RADIUS, DOT_RISE, DOUBLE_RULE_GAP, FONT_SIZE, FOOTER_BASELINE_OFFSET, FOOTER_DISTANCE,
-                     HEADER_DISTANCE, PAGE_H, PAGE_W, RULE_WIDTH)
+from .layout import DOT_RADIUS, DOT_RISE, DOUBLE_RULE_GAP, FONT_SIZE, PAGE_H, PAGE_W, RULE_WIDTH
 
 def _font_dir():
     """同梱の書体（assets/fonts）の場所。exe（PyInstaller）では展開先（Windows の exe には入れない）。"""
@@ -85,12 +84,12 @@ def register_font(path, index=0):
 
 def _has_bold(ts, lines):
     return any(g.bold for ln in lines for g in ln.glyphs) or any(
-        g.bold for piece in getattr(ts, "tables", []) for g in piece.glyphs)
+        g.bold for piece in ts.tables for g in piece.glyphs)
 
 
 def _draw_glyph(c, x, y, g):
     """字を描く。太字の字はゴシック（ＭＳ ゴシック、Mac などでは IPAゴシック）で描き、書体を戻す。横の倍率のある字
-    （複合見出しの外側の括弧の番号）は、倍率を掛けて描く。"""
+    （［番号1字］で縮めた見出しの番号）は、倍率を掛けて描く。"""
     if g.bold:
         c.setFont(c.vamd_fonts[1], FONT_SIZE)
         c.drawString(x, y, g.ch)
@@ -145,7 +144,7 @@ def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTT
     """
     mincho, gothic = fonts or DEFAULT_FONTS
     pages = max((ln.page for ln in lines), default=1)
-    pages = max([pages] + [p.page for p in getattr(ts, "tables", [])])
+    pages = max([pages] + [p.page for p in ts.tables])
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(PAGE_W, PAGE_H), invariant=1)
     # 描くときに使う書体の名前（本文、太字）。描く関数は、ここから読む
@@ -158,7 +157,7 @@ def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTT
         # 上から描き、ページ番号はページの最後に描く（突き合わせで、余白の字からページ番号を除くため）
         items = [(ts.line_baseline(ln), 0, ln) for ln in lines if ln.page == pg]
         items += [(piece.rows[0].top if piece.rows else 0, 1, piece)
-                  for piece in getattr(ts, "tables", []) if piece.page == pg]
+                  for piece in ts.tables if piece.page == pg]
         for _, is_table, item in sorted(items, key=lambda t: (t[0], t[1])):
             if is_table:
                 draw_table(c, ts, item, highlight)

@@ -24,8 +24,6 @@ class PreviewMixin:
 
     def _render_preview(self):
         text = self.real_text()
-        if text is None:
-            return
         try:
             data = self.session.preview_pdf(text, highlight=True)     # 蛍光ペンは確認表示だけで塗る
         except FontNotEmbeddable as e:
@@ -79,8 +77,7 @@ class PreviewMixin:
         self.canvas.delete("all")
         for top in self._page_tops:
             self.canvas.create_rectangle(x - 1, top - 1, x + pw, top + ph, outline=theme.BORDER, fill="white")
-        total_h = self._page_tops[-1] + ph + PAGE_GAP
-        self.canvas.configure(scrollregion=(0, 0, max(x + pw + PAGE_GAP, width), total_h))
+        self.canvas.configure(scrollregion=(0, 0, max(x + pw + PAGE_GAP, width), self._total_height()))
         self.canvas.yview_moveto(fraction)
         self.zoom_label.configure(text=f"{round(zoom * 100)}%")
         self._render_visible()
@@ -130,7 +127,7 @@ class PreviewMixin:
         self.canvas.delete("current_page")
         m = self.session.layout_map
         pos = self._cursor_real()
-        if m is None or pos is None or not getattr(self, "_page_tops", None):
+        if m is None or pos is None or not self._page_tops:
             return
         found = m.locate(*pos)
         if found is None:
@@ -149,18 +146,16 @@ class PreviewMixin:
         cy = self._page_tops[page] + top * z
         # 印は、入力カーソルと同じ位置（字と字の間）の上の ▼（縦棒だと、確認表示に入力できるように見えるため。
         # 2026-10-23 班長決定）
-        mid = cx
         char_top = cy + (h - FONT_SIZE) / 2 * z
         s = max(CARET_MIN_SIZE, CARET_SIZE * z)
         # エディターの ▼ が点滅の途中（消えているところ）なら、確認表示の ▼ も消した形で描く（そろえて点滅させる）
-        self.canvas.create_polygon(mid - s, char_top - s * 1.6, mid + s, char_top - s * 1.6, mid, char_top - 1,
+        self.canvas.create_polygon(cx - s, char_top - s * 1.6, cx + s, char_top - s * 1.6, cx, char_top - 1,
                                    fill=theme.ACCENT, outline="", tags="caret",
                                    state="hidden" if self._blink_hidden else "normal")
         if scroll:
             view_top, view_h = self.canvas.canvasy(0), self.canvas.winfo_height()
             if cy < view_top or cy + h * z > view_top + view_h:
-                total_h = self._page_tops[-1] + self._page_size[1] + PAGE_GAP
-                self.canvas.yview_moveto(max(0.0, (cy - view_h / 3) / total_h))
+                self.canvas.yview_moveto(max(0.0, (cy - view_h / 3) / self._total_height()))
                 self._render_visible()
 
     def _set_preview_caret_visible(self, visible):
@@ -170,7 +165,7 @@ class PreviewMixin:
     def on_preview_click(self, event):
         """確認表示でクリックした字の位置に、エディターのカーソルを動かす。"""
         m = self.session.layout_map
-        if m is None or not getattr(self, "_page_tops", None):
+        if m is None or not self._page_tops:
             return
         cx, cy = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
         ph = self._page_size[1]
@@ -201,7 +196,7 @@ class PreviewMixin:
 
     def _render_visible(self):
         doc = self._preview_doc
-        if doc is None or not getattr(self, "_page_tops", None) or len(self._page_tops) != len(doc):
+        if doc is None or not self._page_tops or len(self._page_tops) != len(doc):
             return
         top = self.canvas.canvasy(0)
         bottom = self.canvas.canvasy(self.canvas.winfo_height())
@@ -223,6 +218,10 @@ class PreviewMixin:
             self._preview_page = self._page_at(top + self.canvas.winfo_height() / 2)
         self.page_label.configure(text=f"{self._preview_page + 1} / {len(doc)}")
 
+    def _total_height(self):
+        """確認表示の全ページを並べた高さ（画素）。"""
+        return self._page_tops[-1] + self._page_size[1] + PAGE_GAP
+
     def _page_at(self, y):
         """canvas の高さ y にあるページ（0 から）。"""
         k = 0
@@ -233,11 +232,10 @@ class PreviewMixin:
 
     def on_page(self, step):
         """前・次のページの上の端まで送る。"""
-        if self._preview_doc is None or not getattr(self, "_page_tops", None):
+        if self._preview_doc is None or not self._page_tops:
             return
         k = max(0, min(len(self._page_tops) - 1, self._preview_page + step))
-        total_h = self._page_tops[-1] + self._page_size[1] + PAGE_GAP
-        self.canvas.yview_moveto((self._page_tops[k] - PAGE_GAP) / total_h)
+        self.canvas.yview_moveto((self._page_tops[k] - PAGE_GAP) / self._total_height())
         self._render_visible()
 
     def on_zoom(self, step):

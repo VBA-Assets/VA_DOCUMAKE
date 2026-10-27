@@ -11,7 +11,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .doctypes import DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_LABELS
+from .doctypes import DEFAULT_DOC_TYPE, DOC_TYPES, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_LABELS
 from .theme import EDITOR_FONT_SIZE, EDITOR_LINE_SPACING
 from .vamd import default_folder
 
@@ -29,7 +29,7 @@ def config_path():
 
 @dataclass
 class AppConfig:
-    doc_type: str = "Saiban"
+    doc_type: str = DEFAULT_DOC_TYPE
     page_number: str = PAGE_NUMBER_BOTTOM_CENTER
     line_numbers: bool = False      # 行番号（新しい文書の既定。2026-10-24 班長指示）
     one_width: bool = False         # 見出し番号を1字の幅に縮める（新しい文書の既定。2026-10-26 班長指示）
@@ -45,9 +45,14 @@ class AppConfig:
     editor_line_spacing_pt: int = EDITOR_LINE_SPACING     # Ver151 から。それまでは editor_line_spacing（画素）
     ai_prompt: str = ""             # 利用者が直した AI への指示（"" は既定。新しい文書に使う。2026-10-24 班長指示）
 
+    def remember_settings(self, settings):
+        """文書の設定（vamd.Settings）を、次の新しい文書の既定として覚える（2026-10-23 班長指示）。"""
+        self.doc_type, self.page_number = settings.doc_type, settings.page_number
+        self.line_numbers, self.one_width = settings.line_numbers, settings.one_width
+
     def __post_init__(self):
         if self.doc_type not in DOC_TYPES:
-            self.doc_type = "Saiban"
+            self.doc_type = DEFAULT_DOC_TYPE
         if self.page_number not in PAGE_NUMBER_LABELS:
             self.page_number = PAGE_NUMBER_BOTTOM_CENTER
         if not isinstance(self.line_numbers, bool):

@@ -1,6 +1,7 @@
 """1つの文書の作業（組む・保存・開く・構文ファイル・AI の回答の取り込み）。画面からは独立させる。
 
-・実名の文章は、画面の入力欄にあり、このクラスは受け取るだけで、ファイルにはしない（仕様.md の9.1）。
+・エディターは記号で表示し、実名の文章（記号を元の語に戻したもの）は、画面から受け取って組むだけで、ファイルには
+  しない（仕様.md の9.1）。
   手元に残すのは、PDF（実名）と構文ファイル（記号）の2つで、いつも同じ版で保存する。
 ・辞書・対応表はメモリの中だけに持つ（Dictionary）。開き直したときは、構文ファイルと PDF を突き合わせて作り直す。
 ・構文ファイルは、AI に渡す前も後も、テキストエディターや画面で自由に直してよい（2026-10-23 班長指示）。
@@ -15,10 +16,9 @@ import fitz  # PyMuPDF
 
 from . import vamd
 from .cleanup import clean_lines
-from .doctypes import DOC_TYPES, can_one_width, doc_type_for
+from .doctypes import doc_type_for
 from .document import parse
 from .layout import Typesetter
-from .naiyou import DOC_TYPE as NAIYOU
 from .pdfwriter import pdf_bytes, read_id, write_pdf
 from .pseudonym import Dictionary, NotRegistrable, tokens_in, trim_selection
 from .recover import Recovery, rebuild_dictionary
@@ -47,9 +47,8 @@ class Session:
     def new(self):
         self.doc_id = vamd.new_doc_id()
         self.version = 0
-        self.settings = vamd.Settings(self.cfg.doc_type, self.cfg.page_number,
-                                      self.cfg.line_numbers and self.cfg.doc_type != NAIYOU,
-                                      self.cfg.one_width and can_one_width(DOC_TYPES[self.cfg.doc_type]))
+        self.settings = vamd.Settings(self.cfg.doc_type, self.cfg.page_number, self.cfg.line_numbers,
+                                      self.cfg.one_width).normalized()
         self.dictionary = Dictionary()
         self.prompt = self.cfg.ai_prompt or None    # 利用者が直した AI への指示（None なら既定の指示。オプションで直す）
         self.pdf_path = None
@@ -121,7 +120,7 @@ class Session:
             for g in ln.glyphs:
                 if m.glyph_source(ln, g) in marked:
                     g.pseudonym = True
-        for piece in getattr(ts, "tables", []):
+        for piece in ts.tables:
             for g in piece.glyphs:
                 if m.cell_glyph_source(piece, g) in marked:
                     g.pseudonym = True
@@ -160,8 +159,7 @@ class Session:
         self.saved_body = self.body(text)
         self.saved_settings = replace(self.settings)
         self.cfg.remember_pdf_folder(pdf_path.parent)
-        self.cfg.doc_type, self.cfg.page_number = self.settings.doc_type, self.settings.page_number
-        self.cfg.line_numbers, self.cfg.one_width = self.settings.line_numbers, self.settings.one_width
+        self.cfg.remember_settings(self.settings)
 
     # ---------- 仮名化の解除・元の語の変更 ----------
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 
 from .document import BLANK, BULLET, CENTER, FOOTER, HEADER, HEADING, NUMBER, PAGE_BREAK, RIGHT, SECTION_BREAK, TABLE
 from .document import TITLE, TOC, TOC_LEVELS, heading_label, squeezed_numbers
-from .doctypes import (PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED, PAGE_NUMBER_BOTTOM_RIGHT,
+from .doctypes import (NAIYOU, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED, PAGE_NUMBER_BOTTOM_RIGHT,
                        PAGE_NUMBER_TOP_RIGHT, TITLE_CENTER, TITLE_JUSTIFY, TITLE_LEFT)
 
 MM = 72 / 25.4
@@ -27,7 +27,6 @@ HF_ABOVE = HF_LINE_PITCH - HF_BELOW
 # 余白に入りきらないヘッダー・フッターを、用紙の端の側へずらすときの限り（用紙の端からの距離。2026-10-25 班長決定）
 HF_EDGE_MIN = 5 * MM
 _FOOTER_PAGE_NUMBERS = (PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED, PAGE_NUMBER_BOTTOM_RIGHT)
-_NAIYOU = "Naiyou"              # 内容証明（ヘッダー・フッターを付けない。naiyou.DOC_TYPE と同じ）
 
 # 表の値（仕様.md の5.3。Word に合わせ込まず、Word の既定に寄せた読みやすい値）
 CELL_PAD_X = 1.9 * MM           # セルの左右の余白（Word の既定 1.9mm）
@@ -80,7 +79,7 @@ class Glyph:
     highlight: bool = False  # 蛍光ペン（==文字==。確認表示だけで黄色に塗る）
     dot: bool = False        # 傍点（*文字*。字の上に黒丸を付ける）
     pseudonym: bool = False  # 仮名化した語の字（確認表示だけで地に色を付ける。2026-10-24 班長指示）
-    scale: float = 1.0       # 字の横の倍率（複合見出しの外側の括弧の番号を全角1字の幅に縮める。2026-10-26）
+    scale: float = 1.0       # 字の横の倍率（［番号1字］で見出しの番号を全角1字の幅に縮める。2026-10-26）
 
 
 @dataclass
@@ -132,6 +131,7 @@ class Typesetter:
         self.page_number = page_number
         self.page_number_shift = {}     # ページ → ページ番号をずらす量（ヘッダー・フッターが余白に入りきらないとき）
         self.warnings = []              # 利用者に知らせること（ヘッダーが本文に重なるなど）
+        self.tables = []                # 組んだ表（TablePiece。layout で作り直す）
         top, bottom, left, right = dt.margins
         chars, lines = dt.chars_lines
         self.margin_top, self.margin_left = top * MM, left * MM
@@ -441,7 +441,7 @@ class Typesetter:
         self.page_number_shift, self.warnings = {}, []
         if not any(s[HEADER] or s[FOOTER] for s in sections):
             return
-        if self.dt.key == _NAIYOU:
+        if self.dt.key == NAIYOU:
             self.warnings.append("内容証明には、ヘッダー・フッターを付けません（[HEADER]・[FOOTER] の行は組みません）。")
             return
         pages = max([ln.page for ln in out] + [piece.page for piece in self.tables] + [1])

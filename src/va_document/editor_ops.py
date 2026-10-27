@@ -1,5 +1,5 @@
-"""エディター（入力欄）の操作：カーソルの上の ▼ と行への送り、配置・改ページなどの記号、見出しのレベル、標準、記号の色付け、
-貼り付け、検索。
+"""エディター（入力欄）の操作：配置・改ページなどの記号、見出しのレベル、標準、記号の色付け、貼り付け、検索
+（カーソルの上の ▼ と行への送りは editor_mark.py、表のセルの配置は table_ops.py）。
 
 メインの画面（app.MainWindow）の部品（mixin）。self.text（tk.Text）・self.session などは MainWindow が持つ。
 """
@@ -7,123 +7,23 @@ import math
 import re
 import tkinter as tk
 
-from . import theme, vamd
+from . import vamd
 from .document import (BULLET, BULLET_MARK, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN,
                        DISTRIBUTE_RE, HEADING, HEADING_BUTTON_MARK, HEADING_MARK_RE, INDENT_MARK, LEAD_ALIGN_MARKS,
                        LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, NUMBER_MARK, RIGHT_MARK, TABLE, area_of,
-                       cell_separators, has_inline_marks, inline_mark_spans, is_line_mark, lead_mark_len, leading_wrap,
-                       move_wraps_after_marks, parse, parse_separator, remove_bold, split_inline, split_lead_marks)
+                       cell_separators, has_inline_marks, inline_mark_spans, is_line_mark, is_table_line, lead_mark_len,
+                       leading_wrap,
+                       move_wraps_after_marks, parse, remove_bold, split_inline, split_lead_marks)
+from .editor_mark import EditorMarkMixin
 from .find_dialog import FindDialog
 from .layout import is_half
-from .pseudonym import TOKEN_RE, normalize_token
+from .pseudonym import TOKEN_RE
+from .table_ops import TableCellMixin
 from .undo import undoable
 
-EDITOR_MARK_HEIGHT = 6      # カーソルの上の ▼ の高さ（ポイント。行の間隔の最低値と同じで、行の間に入る）
-EDITOR_MARK_WATCH_MS = 300  # ▼ の置き直しの漏れを拾う間隔（ミリ秒）
-EDITOR_MARK_BLINK_MS = 1000         # カーソルを動かしたとき、▼ を点滅させる時間（ミリ秒。2026-10-26 班長指示）
-EDITOR_MARK_BLINK_STEP_MS = 250     # 点滅の、出す・消すの1回の時間（ミリ秒）
 
-
-class EditorMixin:
-    """エディターの操作（MainWindow に混ぜて使う）。"""
-
-    # ----------------------------------------------------------------------
-    # カーソルの位置の ▼ と、カーソルの行への送り（2026-10-26 班長決定）
-    # ----------------------------------------------------------------------
-
-    def _init_editor_mark(self):
-        """カーソルの上に、確認表示と同じ青い ▼ を常に出す仕組みを作る（self.text を作った直後に呼ぶ）。確認表示を
-        使っている間はエディターのカーソルが点滅しないので、2つの画面を行き来しても位置が分かるようにする。
-
-        Tk の入力欄には字の上に描けないので、小さな描画欄を重ねる。重ねた印は字と一緒に動かないので、カーソルが
-        動く・送る・書き換えるたびに置き直す。プログラムでカーソルだけを動かしたとき（検索・置換、AI の回答の
-        取り込みなど）の漏れは、しばらくごとの見回りで拾う。
-
-        カーソルを動かしたときは、▼ を1秒点滅させてから出したままにする。確認表示の ▼ も同時に点滅させる（字を打つ・
-        消す・貼り付けるときは点滅させない。入力の間ずっと点滅してしまうため。2026-10-26 班長指示・班長決定）。
-        """
-        self._editor_mark = tk.Canvas(self.text, highlightthickness=0, bd=0, background=self.text.cget("background"))
-        self._editor_mark_at = self._editor_mark_job = None
-        self._editor_mark_index = self._editor_text_len = None     # 前に置いたときのカーソルの位置と、文章の字数
-        self._blink_job, self._blink_left, self._blink_hidden = None, 0, False
-        for seq in ("<Key>", "<KeyRelease>", "<Button-1>", "<B1-Motion>", "<ButtonRelease-1>", "<Configure>",
-                    "<<Modified>>"):
-            self.text.bind(seq, lambda e: self._schedule_editor_mark(), add="+")
-        self.after(EDITOR_MARK_WATCH_MS, self._watch_editor_mark)
-
-    def _schedule_editor_mark(self):
-        """エディターの処理（字の入力・カーソルの移動・送り）が済んだ後に、▼ を置き直す。"""
-        if self._editor_mark_job is None:
-            self._editor_mark_job = self.after_idle(self._show_editor_mark)
-
-    def _watch_editor_mark(self):
-        self._show_editor_mark()
-        self.after(EDITOR_MARK_WATCH_MS, self._watch_editor_mark)
-
-    def _show_editor_mark(self):
-        """カーソルの上（行の間）に ▼ を置く。カーソルが見えていないときは消す。位置が変わっていなければ何もしない。"""
-        self._editor_mark_job = None
-        mark = self._editor_mark
-        # カーソルが動き、文章の字数が変わっていなければ（字を打ったのではなく、カーソルを動かした）、点滅させる
-        index, length = self.text.index("insert"), self.text.count("1.0", "end", "chars")
-        if self._editor_mark_index is not None and index != self._editor_mark_index and length == self._editor_text_len:
-            self._start_blink()
-        self._editor_mark_index, self._editor_text_len = index, length
-        box = self.text.bbox("insert")
-        if box is None:
-            mark.place_forget()
-            self._editor_mark_at = None
-            return
-        # 行の間（行の間隔。オプションで 6 ポイントより狭くはできない）に入る大きさ。表示の拡大に合わせる
-        h = max(4, round(EDITOR_MARK_HEIGHT * self.text.winfo_fpixels("1p")))
-        s = round(h / 1.6)
-        at = (box[0] - s, box[1] - h, s, h)
-        if at == self._editor_mark_at:
-            return
-        self._editor_mark_at = at
-        w = 2 * s + 1
-        mark.delete("all")
-        mark.configure(width=w, height=h)
-        mark.create_polygon(0, 0, w, 0, s, h, fill=theme.ACCENT, outline="")
-        self._set_mark_visible(not self._blink_hidden)
-
-    def _set_mark_visible(self, visible):
-        """エディターと確認表示の ▼ を、出す・消す（点滅は両方そろえる）。"""
-        self._blink_hidden = not visible
-        at = self._editor_mark_at
-        if visible and at is not None:
-            self._editor_mark.place(x=at[0], y=at[1], bordermode="outside")     # bbox は枠を含めた位置
-        else:
-            self._editor_mark.place_forget()
-        self._set_preview_caret_visible(visible)
-
-    def _start_blink(self):
-        """▼ を点滅させ始める（点滅の途中でまた動かしたら、そこから数え直す）。消す・出すを繰り返し、出して終わる。"""
-        if self._blink_job is not None:
-            self.after_cancel(self._blink_job)
-        self._blink_left = EDITOR_MARK_BLINK_MS // EDITOR_MARK_BLINK_STEP_MS // 2 * 2     # 偶数（出して終わる）
-        self._set_mark_visible(True)
-        self._blink_job = self.after(EDITOR_MARK_BLINK_STEP_MS, self._blink_step) if self._blink_left > 0 else None
-
-    def _blink_step(self):
-        self._blink_left -= 1
-        self._set_mark_visible(self._blink_left % 2 == 0)
-        self._blink_job = self.after(EDITOR_MARK_BLINK_STEP_MS, self._blink_step) if self._blink_left > 0 else None
-
-    def _scroll_to_third(self, index):
-        """index の行を、見えていても、エディターの上から3分の1の高さに送る（see() だと端に出て、カーソルを探しにくい。
-        いつも同じ高さに出れば探さなくてよい）。
-
-        一度その行を一番上に送り、上から3分の1の高さとの差だけ戻す。文書の終わりの近くでは一番上まで送れず
-        （文章の終わりで止まる）、決まった高さだけ戻すと行が下の端から外れるので、実際の位置との差で送る。
-        """
-        self.text.update_idletasks()
-        self.text.yview(f"{index} display linestart")
-        self.text.update_idletasks()
-        info = self.text.dlineinfo(index)
-        if info is not None:
-            self.text.yview_scroll(info[1] - self.text.winfo_height() // 3, "pixels")
-        self.text.see(index)        # 念のため（見えていれば何もしない）
+class EditorMixin(EditorMarkMixin, TableCellMixin):
+    """エディターの操作（MainWindow に混ぜて使う）。カーソルの上の ▼ は editor_mark.py、表のセルの操作は table_ops.py。"""
 
     def _highlight(self):
         self.text.tag_remove("registered", "1.0", "end")
@@ -236,9 +136,10 @@ class EditorMixin:
         """選んだ字を均等割付にする（[文字]{N} の形で挟む。N は選んだ字の数〔半角は半字〕を切り上げた字数で、
         目次と同じくエディターで手で直す。2026-10-24 班長指示）。既に挟まれていれば外す。行をまたぐ選択と、
         空白だけの選択には付けない。Ctrl+Z 1回で戻せる。"""
-        try:
-            a, b = self.text.index("sel.first"), self.text.index("sel.last")
-        except tk.TclError:
+        sel = self._sel_range()
+        if sel:
+            a, b = sel
+        else:
             # 表のセルにカーソルがあれば、そのセルの字全体を挟む・外す（配置の記号の後から。2026-10-24 班長指示）
             cells = self._table_cells()
             if not cells:
@@ -284,10 +185,10 @@ class EditorMixin:
         """選んだ文字列を wrap（** == *）で囲む。既に囲まれていれば外す。行をまたぐ選択と、空白だけの選択には
         付けない。Ctrl+Z 1回で戻せる。太字と傍点は * の数で見分ける（「***語***」は太字と傍点。* が2つ以上なら太字、
         奇数なら傍点）。"""
-        try:
-            a, b = self.text.index("sel.first"), self.text.index("sel.last")
-        except tk.TclError:
+        sel = self._sel_range()
+        if not sel:
             return
+        a, b = sel
         sel = self.text.get(a, b)
         if not sel.strip(" 　") or "\n" in sel:
             return
@@ -331,10 +232,7 @@ class EditorMixin:
 
     def _heading_for_bold(self):
         """［太字］で同じ段の見出しをそろえるときの (行の番号, 見出しの階層)。そうでなければ None。"""
-        try:
-            a, b = self.text.index("sel.first"), self.text.index("sel.last")
-        except tk.TclError:
-            a = b = self.text.index("insert")
+        a, b = self._sel_range(insert=True)
         n = int(a.split(".")[0])
         if int(b.split(".")[0]) != n:
             return None
@@ -374,6 +272,16 @@ class EditorMixin:
         self.text.tag_remove("sel", "1.0", "end")
         self.text.mark_set("insert", insert)
 
+    def _sel_range(self, insert=False):
+        """選んだ範囲の (先頭, 末尾) の位置。選んでいなければ、insert が真ならカーソルの位置を2つ、偽なら None。"""
+        try:
+            return self.text.index("sel.first"), self.text.index("sel.last")
+        except tk.TclError:
+            if insert:
+                index = self.text.index("insert")
+                return index, index
+            return None
+
     def _selection(self):
         try:
             return self.text.get("sel.first", "sel.last")
@@ -406,7 +314,7 @@ class EditorMixin:
         rows = []
         for n in range(first, last + 1):
             line = self.text.get(f"{n}.0", f"{n}.end")
-            if line.lstrip().startswith("|") or is_line_mark(line) or vamd.SEPARATOR_RE.match(line):
+            if _structural_line(line):
                 continue
             rows.append((n, line, move_wraps_after_marks(line)))
         if not rows and not cells and not columns:
@@ -425,8 +333,8 @@ class EditorMixin:
                 lead = split_lead_marks(norm)
                 rest = lead.rest
                 align = "" if release or mark == INDENT_MARK else mark
-                first = not release and mark == INDENT_MARK
-                prefix = lead._replace(align=align, first=first, rest="").join()
+                indent_first = not release and mark == INDENT_MARK
+                prefix = lead._replace(align=align, first=indent_first, rest="").join()
                 if norm != line:
                     self.text.delete(f"{n}.0", f"{n}.end")
                     self.text.insert(f"{n}.0", prefix + rest)
@@ -435,91 +343,16 @@ class EditorMixin:
                     self.text.delete(f"{n}.0", f"{n}.{len(line) - len(rest)}")
                     self.text.insert(f"{n}.0", prefix)
 
-    def _table_cells(self, separator=False):
-        """カーソルのあるセル（字を選んでいれば、選んだ範囲にかかるセル）[(行, 左の | の位置, 右の | の位置)]。
-        表の区切りの行（2行目）は除く（separator が真なら、区切りの行のセルだけ）。"""
-        try:
-            a, b = self.text.index("sel.first"), self.text.index("sel.last")
-        except tk.TclError:
-            a = b = self.text.index("insert")
-        (la, ca), (lb, cb) = [tuple(int(v) for v in x.split(".")) for x in (a, b)]
-        out = []
-        for n in range(la, lb + 1):
-            line = self.text.get(f"{n}.0", f"{n}.end")
-            if not line.lstrip().startswith("|") or (parse_separator(line) is None) == separator:
-                continue
-            seps = cell_separators(line)
-            bounds = list(zip(seps, seps[1:]))
-            if a == b:
-                # カーソルが表の外側（最初の | の前・最後の | の後）なら、いちばん近いセル
-                hit = [(s, e) for s, e in bounds if s < ca <= e] or (bounds[-1:] if bounds and ca > bounds[-1][1] else bounds[:1])
-            else:
-                lo, hi = (ca if n == la else 0), (cb if n == lb else len(line))
-                hit = [(s, e) for s, e in bounds if s + 1 < hi and e > lo]
-            out += [(n, s, e) for s, e in hit]
-        return out
-
-    def _cell_content(self, n, s, e):
-        """セルの中身の位置 (配置の記号を置く位置, 字の始め, 字の終わり, 配置の記号の一致)。前後の空白は除く。"""
-        line = self.text.get(f"{n}.0", f"{n}.end")
-        pos = s + 1
-        while pos < e and line[pos] in " 　":
-            pos += 1
-        end = e
-        while end > pos and line[end - 1] in " 　":
-            end -= 1
-        m = CELL_ALIGN_RE.match(line, pos, end)
-        start = pos + len(m.group(0)) if m and not m.group(1) else pos
-        while start < end and line[start] in " 　":
-            start += 1
-        return pos, start, end, m
-
-    def _align_cells(self, cells, mark):
-        """セルの先頭の配置の記号を付け替える。すべてのセルが既にその記号なら外す。"""
-        if not cells:
-            return
-        found = [self._cell_content(n, s, e)[3] for n, s, e in cells]
-        release = all(m and m.group(2).strip() == mark.strip() for m in found)
-        for n, s, e in sorted(cells, reverse=True):          # 右・下のセルから（前の位置がずれないように）
-            pos, _, _, m = self._cell_content(n, s, e)
-            if m:
-                self.text.delete(f"{n}.{m.start(2)}", f"{n}.{m.end(2)}")
-            if not release:
-                self.text.insert(f"{n}.{pos}", mark)
-
-    def _align_columns(self, columns, mark):
-        """区切りの行のセルの : を付け替える（中央は :---:、右は ---:）。すべての列が既にその配置なら、
-        左（---）に戻す。- と = の種類と数は変えない（2重線の設定は変わらない）。"""
-        if not columns:
-            return
-        want = {CENTER_MARK: (True, True), RIGHT_MARK: (False, True)}[mark]
-
-        def parts(n, s, e):
-            cell = self.text.get(f"{n}.{s + 1}", f"{n}.{e}")
-            core = cell.strip(" 　")
-            lead = len(cell) - len(cell.lstrip(" 　"))
-            return s + 1 + lead, core
-        release = all((parts(*c)[1].startswith(":"), parts(*c)[1].endswith(":")) == want for c in columns)
-        for n, s, e in sorted(columns, reverse=True):
-            start, core = parts(n, s, e)
-            body = core.strip(":")
-            left, right = (False, False) if release else want
-            new = (":" if left else "") + body + (":" if right else "")
-            if new != core:
-                self.text.delete(f"{n}.{start}", f"{n}.{start + len(core)}")
-                self.text.insert(f"{n}.{start}", new)
-
     def on_indent(self):
         """選んだ行（なければカーソルの行）に +1 を付ける。対象の行がすべて既に +N なら外す（ほかの
         ボタンと同じく、もう一度押すと解除。字数は、目次と同じくエディターで手で直す。2026-10-24 班長指示）。
         既に +N のある行の字数は変えない。見出し・箇条書き・段落番号の行には付けない（付けると見出しなどで
         なくなるため）。Ctrl+Z 1回で戻せる。"""
         def target(line):
-            if (not line.strip() or line.lstrip().startswith("|") or is_line_mark(line)
-                    or vamd.SEPARATOR_RE.match(line)):
+            if not line.strip() or _structural_line(line):
                 return None
             parts = split_lead_marks(move_wraps_after_marks(line))
-            if not parts[1] and (HEADING_MARK_RE.match(parts[3]) or LIST_MARK_RE.match(parts[3])):
+            if not parts.left and (HEADING_MARK_RE.match(parts.rest) or LIST_MARK_RE.match(parts.rest)):
                 return None
             return parts
         self._toggle_lines(target, lambda p: p.left,
@@ -531,7 +364,7 @@ class EditorMixin:
         配置の記号・+N・-> は残す。表・改ページなどの記号の行・区切りの行と、見出し・箇条書き・段落番号の行には
         付けない（付けると見出しなどでなくなるため。［インデント］と同じ）。Ctrl+Z 1回で戻せる。"""
         def target(line):
-            if line.lstrip().startswith("|") or is_line_mark(line) or vamd.SEPARATOR_RE.match(line):
+            if _structural_line(line):
                 return None
             parts = split_lead_marks(move_wraps_after_marks(line))
             if not (parts.area or parts.left or parts.first) and (
@@ -658,7 +491,7 @@ class EditorMixin:
     def on_plain(self):
         """標準の本文（左寄せ）にする（Word の Ctrl+Shift+N）。見出し・箇条書き・段落番号・配置の記号を外す。"""
         def change(line, n):
-            if line.lstrip().startswith("|") or is_line_mark(line) or vamd.SEPARATOR_RE.match(line):
+            if _structural_line(line):
                 return None
             # 「**:-: # 見出し**」は「:-: # **見出し**」として扱う。配置・+N・-> の記号を外す（ヘッダー・フッターの
             # 記号は、置く場所の記号なので残す。Word の「標準」でも、ヘッダーの段落はヘッダーのまま）
@@ -726,7 +559,7 @@ def _mark_spans(text):
         if is_line_mark(stripped):
             start = pos + line.index(stripped)
             out.append((start, start + len(stripped)))
-        elif line.lstrip().startswith("|"):
+        elif is_table_line(line):
             for m in _CELL_MARK_RE.finditer(line):
                 out.append((pos + m.start(2), pos + m.end(2)))
         else:
@@ -737,7 +570,7 @@ def _mark_spans(text):
                 while leading_wrap(body[off:]):
                     off += len(leading_wrap(body[off:]))
             # 行頭の配置・+N・-> の記号
-            lead = len(body) - off - len(split_lead_marks(body[off:])[3])
+            lead = len(body) - off - len(split_lead_marks(body[off:]).rest)
             if lead:
                 start = pos + len(line) - len(body) + off
                 out.append((start, start + lead))
@@ -745,11 +578,15 @@ def _mark_spans(text):
     return out
 
 
+def _structural_line(line):
+    """行頭の記号のボタンで変えない行（表の行・改ページなどの記号の行・構文ファイルの区切りの行）。"""
+    return is_table_line(line) or is_line_mark(line) or bool(vamd.SEPARATOR_RE.match(line))
+
+
 def _special_line(line):
     """見出しのレベルを変えない行（表・改ページなどの記号の行・配置の記号の行・区切りの行・空の行）。"""
-    s = line.strip()
     lead = split_lead_marks(move_wraps_after_marks(line))
-    return (not s or s.startswith("|") or is_line_mark(s) or vamd.SEPARATOR_RE.match(line)
+    return (not line.strip() or _structural_line(line)
             or bool(lead.align or lead.left or lead.first or lead.area))
 
 

@@ -40,12 +40,18 @@ class AiMixin:
         if chosen is None:
             return
         token = self.session.dictionary.register(word, *chosen)
+        self._after_dictionary_change()  # エディターの同じ語を、すべて記号に置き換える
+        self.status.configure(text=f"「{word}」を {token} として仮名化しました。")
+
+    def _after_dictionary_change(self, tokenize=True):
+        """仮名化した語を登録・変更・解除した後に、一覧・エディター・確認表示・題を新しくする。tokenize なら、
+        エディターに実名のまま残っている仮名化した語を記号にする（解除のときは要らない）。"""
         self._refresh_dictionary()
-        self._tokenize_editor()          # エディターの同じ語を、すべて記号に置き換える
+        if tokenize:
+            self._tokenize_editor()
         self._highlight()
         self._render_preview()
         self._update_title()
-        self.status.configure(text=f"「{word}」を {token} として仮名化しました。")
 
     def _unregister(self, token):
         e = self.session.dictionary.find(token)
@@ -53,10 +59,7 @@ class AiMixin:
             # エディターの記号を、先に元の語に戻す（解除した語が記号のまま残らないように）
             self._replace_in_editor(token, e.word)
         e = self.session.unregister(token)
-        self._refresh_dictionary()
-        self._highlight()
-        self._render_preview()
-        self._update_title()
+        self._after_dictionary_change(tokenize=False)
         if e:
             self.status.configure(text=f"「{e.word}」（{e.token}）の仮名化を解除しました。")
 
@@ -84,12 +87,8 @@ class AiMixin:
             return
         if old_token != e.token:
             self._replace_in_editor(old_token, e.token)
-        self._refresh_dictionary()
+        self._after_dictionary_change()  # 新しい語をエディターに打ってあれば、記号にする
         self.tree.selection_set(e.token)
-        self._tokenize_editor()          # 新しい語をエディターに打ってあれば、記号にする
-        self._highlight()
-        self._render_preview()
-        self._update_title()
         changes = []
         if old_token != e.token:
             changes.append(f"記号を {old_token} から {e.token} に")
@@ -129,7 +128,7 @@ class AiMixin:
             clip = self.clipboard_get()
         except tk.TclError:
             clip = ""
-        if not vamd.SEPARATOR_RE.search(clip) and "==== VA Document" not in clip:
+        if not vamd.has_separator(clip) and "==== VA Document" not in clip:
             messagebox.showinfo(APP_NAME, "クリップボードに AI の回答がありません。\n"
                                 "AI の画面で、回答のコードブロックのコピーボタンを押してから、［貼り付け］を押してください"
                                 "（回答の最初の行に「==== VA Document 文書ID …」の区切りの行が要ります）。", parent=self)

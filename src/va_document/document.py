@@ -400,6 +400,11 @@ def split_cells(line):
     return cells
 
 
+def is_table_line(line):
+    """表の行（| で始まる行）か。"""
+    return line.lstrip().startswith("|")
+
+
 def parse_separator(line):
     """表の区切りの行なら、(列ごとの配置のリスト, 2重線か) を返す。そうでなければ None。"""
     if "|" not in line:
@@ -530,9 +535,9 @@ def parse(lines, dt):
             paras.append(Para("", kind=BLANK, src_line=src))
             continue
         # 表：| で始まる行が続き、2行目が区切りの行のもの
-        if line.lstrip().startswith("|"):
+        if is_table_line(line):
             j = i
-            while j < len(lines) and lines[j].lstrip().startswith("|"):
+            while j < len(lines) and is_table_line(lines[j]):
                 j += 1
             table = parse_table(lines[i - 1:j])
             if table is not None:

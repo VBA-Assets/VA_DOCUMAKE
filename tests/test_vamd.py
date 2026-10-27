@@ -38,12 +38,12 @@ def test_build_and_read_back(tmp_path):
     assert list(tmp_path.iterdir()) == [path]   # 一時ファイルが残らない
     # 行番号（2026-10-24）。行番号の書いていない区切りの行（それより前の構文ファイル）は「なし」
     on = vamd.Settings("Saiban", PAGE_NUMBER_TOP_RIGHT, True)
-    assert vamd.parse_separator(vamd.separator_line("K7Q29XMD", 1, on))[2] == on
-    assert not vamd.parse_separator(sep.replace(" 行番号 なし", ""))[2].line_numbers
+    assert vamd.parse_separator_line(vamd.separator_line("K7Q29XMD", 1, on))[2] == on
+    assert not vamd.parse_separator_line(sep.replace(" 行番号 なし", ""))[2].line_numbers
     # 見出し番号を1字の幅にするか（2026-10-26）。書いていない区切りの行（Ver152 までの構文ファイル）は「なし」
     one = vamd.Settings("Saiban", PAGE_NUMBER_TOP_RIGHT, False, True)
-    assert vamd.parse_separator(vamd.separator_line("K7Q29XMD", 1, one))[2] == one
-    assert not vamd.parse_separator(sep.replace(" 番号1字 なし", ""))[2].one_width
+    assert vamd.parse_separator_line(vamd.separator_line("K7Q29XMD", 1, one))[2] == one
+    assert not vamd.parse_separator_line(sep.replace(" 番号1字 なし", ""))[2].one_width
 
 
 def test_old_separator_without_settings():
@@ -252,6 +252,18 @@ def test_rebuild_with_highlight(tmp_path):
 def test_prompt_explains_highlight():
     assert "==語== は私が画面で付けた目印（蛍光ペン。PDF には出ない）" in vamd.PROMPT
     assert "蛍光ペンの記号（==語==）と均等割付の記号（[語]{5}）は、私が求めたときを除き、付け外ししない" in vamd.PROMPT
+
+
+def test_review_ignores_table_separator_colons():
+    """表の区切りの行の : は、配置の記号として比べない（AI が :-- を :--- に直しても知らせない。Ver210 までは、
+    区切りの行を読む関数の名前が重なり、比べていた）。セルの先頭の配置の記号は比べる。"""
+    current = ["| 項目 | 金額 |", "|:--|--:|", "| :-: 休業損害 | 1,080,000 |"]
+    r = vamd.review(answer(["| 項目 | 金額 |", "|:---|---:|", "| :-: 休業損害 | 1,080,000 |"]), "K7Q29XMD", 3, current,
+                    make_dictionary())
+    assert not r.lost_marks
+    r = vamd.review(answer(["| 項目 | 金額 |", "|:--|--:|", "| 休業損害 | 1,080,000 |"]), "K7Q29XMD", 3, current,
+                    make_dictionary())
+    assert [m for m, _ in r.lost_marks] == [":-:"]
 
 
 def test_review_reports_lost_indent_but_not_changed_count():

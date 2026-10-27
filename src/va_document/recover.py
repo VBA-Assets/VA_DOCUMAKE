@@ -23,10 +23,10 @@ from dataclasses import dataclass, field
 
 import fitz  # PyMuPDF
 
-from .doctypes import PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_NONE, doc_type_for
+from .doctypes import DEFAULT_DOC_TYPE, NAIYOU, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_NONE, doc_type_for
 from .document import FOOTER, HEADER, SECTION_BREAK, TABLE, TOC, parse
 from .document import heading_label
-from .layout import _NAIYOU, toc_entries
+from .layout import toc_entries
 from .layout import Typesetter
 from .pdfwriter import page_number_text, read_id
 from .pseudonym import TOKEN_RE, Dictionary, normalize_token
@@ -137,7 +137,7 @@ def vamd_body_text(lines, dt):
     # ヘッダー・フッター（pdf_area_text と同じ並び）：セクションごとのヘッダー、続けてフッター。字のないものは飛ばし、
     # フッターは前のセクションと同じものを1つにまとめる。内容証明では組まない
     groups, prev = [], None
-    if dt.key != _NAIYOU:
+    if dt.key != NAIYOU:
         groups = [s[HEADER] for s in sections if "".join(p.text for p in s[HEADER]).strip()]
         for s in sections:
             text = "".join(p.text for p in s[FOOTER])
@@ -357,7 +357,7 @@ def rebuild_dictionary(content, pdf_path, doc_type=None):
     if pdf_id is None or pdf_id[0] != content.doc_id:
         raise PdfMismatch("この PDF は、構文ファイルと同じ文書のものではありません。")
     if doc_type is None:
-        doc_type = content.settings.doc_type if content.settings else "Saiban"
+        doc_type = content.settings.doc_type if content.settings else DEFAULT_DOC_TYPE
     page_number = content.settings.page_number if content.settings else PAGE_NUMBER_BOTTOM_CENTER
     one_width = content.settings.one_width if content.settings else False
     r = recover(content.body, pdf_path, doc_type_for(doc_type, one_width), page_number)
