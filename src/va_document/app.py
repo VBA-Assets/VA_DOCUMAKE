@@ -280,8 +280,9 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.register_button = g.large("選択範囲を\n仮名化", self.on_register, "person_lock")
         g.small("コピー", self.on_copy_vamd, "copy")
         g.small("貼り付け", self.on_import, "clipboard_paste")
-        # 文書の種類・ページ番号の選択欄と［見出し］［箇条書き］［段落番号］は「スタイル」の組、［太字］から右は「書式」の
-        # 組にする（2026-10-25 班長指示。それまでは1つの「書式」の組）。選択欄の左端をそろえる。［左］は置かない。
+        # 文書の種類・ページ番号の選択欄と、行番号・番号1字のチェックは「スタイル」の組、文字列に記号を付けるボタンは
+        # 「書式」の組にする（2026-10-25 班長指示で1つの「書式」の組から分け、2026-10-27 班長指示で［見出し］［箇条書き］
+        # ［段落番号］を「スタイル」から「書式」の左端の列に移した）。選択欄の左端をそろえる。［左］は置かない。
         # 同じボタンをもう一度押すと解除する（2026-10-23・24 班長指示）
         g = rb.group("スタイル")
         frame, (self.doc_type_box, self.page_number_box) = labeled_rows(g.body, [
@@ -305,14 +306,14 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         g.block(frame)
         self.doc_type_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
         self.page_number_box.bind("<<ComboboxSelected>>", self.on_settings_changed)
-        # 選択欄の右に、［見出し］［箇条書き］［段落番号］を上から順に置く。見出しは ## で付け、レベルはエディターで
-        # # の数を直す（2026-10-25 班長指示）
+        # 「書式」の組：左端の列に［見出し］［箇条書き］［段落番号］を上から順に置き（見出しは ## で付け、レベルは
+        # エディターで # の数を直す。2026-10-25 班長指示。2026-10-27 に「スタイル」から移した）、その右の列に
+        # ［太字］［傍点］［均等割付］を上から順に置き（2026-10-24 班長指示）、その右に配置のボタン
+        g = rb.group("書式")
         for label, mark, icon in (("見出し", HEADING_BUTTON_MARK, "text_header_2"),
                                   ("箇条書き", BULLET_MARK, "text_bullet_list_ltr"),
                                   ("段落番号", NUMBER_MARK, "text_number_list_ltr")):
             g.small(label, lambda m=mark: self.on_paragraph_kind(m), icon)
-        # 「書式」の組：［太字］［傍点］［均等割付］を上から順に置き（2026-10-24 班長指示）、その右に配置のボタン
-        g = rb.group("書式")
         g.small("太字", self.on_bold, "text_bold")
         g.small("傍点", self.on_dots, "text_emphasis")
         g.small("均等割付", self.on_distribute, "text_align_distributed")
@@ -343,7 +344,12 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.status.pack(side="bottom", fill="x")
         bottom = ttk.Frame(work, padding=(4, 6, 0, 0))
         bottom.pack(side="bottom", fill="x")
-        ttk.Label(bottom, text="仮名化した語").pack(anchor="w")
+        # 一覧の題の右に、変え方を添える（［解除］［変更］のボタンは置かず、行のダブルクリックで開く変更の画面で
+        # 変える・解除する。画面を簡潔にし、仮名化の解除を手軽にしすぎないため。2026-10-27 班長指示）
+        title_row = ttk.Frame(bottom)
+        title_row.pack(anchor="w")
+        ttk.Label(title_row, text="仮名化した語").pack(side="left")
+        ttk.Label(title_row, text="（ダブルクリックで編集）", style="Note.TLabel").pack(side="left")
         tree_row = ttk.Frame(bottom)
         tree_row.pack(fill="x")
         self.tree = ttk.Treeview(tree_row, columns=("token", "word", "kind"), show="headings", height=4,
@@ -355,13 +361,9 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.tree.configure(yscrollcommand=tys.set)
         self.tree.pack(side="left", fill="x", expand=True)
         tys.pack(side="left", fill="y")
-        # ［変更］は、選んだ語の記号と元の語を変える（2026-10-25 班長決定。登録した語の誤りの訂正と、文書をまたいで
-        # そろえる記号の付け替え。［すべて解除］は、押すと構文ファイルが実名だらけになるので置かない）。
-        # 一覧の行をダブルクリックしても変えられる
-        tree_buttons = ttk.Frame(tree_row)
-        tree_buttons.pack(side="left", padx=(8, 0), anchor="n")
-        for label, command in (("解除", self.on_unregister), ("変更", self.on_edit_entry)):
-            ttk.Button(tree_buttons, text=label, command=command).pack(fill="x", pady=(0, 2))
+        # 行をダブルクリックすると、その語の記号と元の語を変える画面を開く（2026-10-25 班長決定。登録した語の誤りの
+        # 訂正と、文書をまたいでそろえる記号の付け替え。画面の下の［解除］で仮名化を解除する。2026-10-27 班長指示。
+        # ［すべて解除］は、押すと構文ファイルが実名だらけになるので置かない）
         self.tree.bind("<Double-Button-1>", lambda e: self.on_edit_entry() if self.tree.identify_row(e.y) else None)
 
         # エディターは常に仮名（記号）で表示し、実名は確認表示で見る（実名・仮名の切り替えはなくした。2026-10-24 班長決定）
@@ -568,9 +570,9 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self._fit_ime()
 
     def on_close(self):
+        # 仮名化した語の一覧が消えることは確かめない（保存した文書は、開き直せば構文ファイルと PDF を突き合わせて
+        # 作り直せる。保存していない変更は _confirm_discard で尋ねる。2026-10-27 班長指示）
         if not self._confirm_discard():
-            return
-        if not self._confirm_forget_dictionary("閉じる"):
             return
         self._remember_window()
         config.save(self.cfg)

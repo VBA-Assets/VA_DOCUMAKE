@@ -88,10 +88,9 @@ class FileMixin:
 
     def on_close_document(self):
         """今の文書を閉じて、新しい文書にする（Word の「閉じる」。VA Document は終わらない。2026-10-24 班長指示）。
-        保存していない変更があれば尋ねる。仮名化した語の一覧（実名と記号の対応）があれば、消えることを確かめる。"""
+        保存していない変更があれば尋ねる。仮名化した語の一覧（実名と記号の対応）が消えることは確かめない（保存した
+        文書は、開き直せば構文ファイルと PDF を突き合わせて作り直せる。2026-10-27 班長指示）。"""
         if not self._confirm_discard():
-            return False
-        if not self._confirm_forget_dictionary("文書を閉じる"):
             return False
         self.session.new()
         self._load_text("")
@@ -284,10 +283,3 @@ class FileMixin:
             self.configure(cursor="")
         self.status.configure(text=f"{saved}{n} ページをプリンターに送りました。")
 
-    def _confirm_forget_dictionary(self, action):
-        """仮名化した語の一覧（実名と記号の対応）があれば、消えることを確かめる。続けてよければ True。"""
-        return not self.session.dictionary.entries or messagebox.askyesno(
-            APP_NAME, f"{action}と、仮名化した語の一覧（実名と記号の対応）は消えます。\n"
-            "AI とのやり取りが終わっていなければ、閉じずに続けてください。\n"
-            "後で開き直したときは、構文ファイルと書式付きファイル（PDF）を突き合わせて、仮名化した語の一覧を作り直します。\n"
-            "閉じますか？", parent=self)

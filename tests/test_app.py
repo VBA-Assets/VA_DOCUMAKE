@@ -330,11 +330,15 @@ def test_ribbon_groups_and_reflow(window):
     while w is not None and w not in rb.groups:
         w = w.master
     assert w is rb.groups[2]
-    # 「スタイル」は選択欄と［見出し］［箇条書き］［段落番号］、「書式」は［太字］から右（2026-10-25 班長指示）
+    # 「スタイル」は選択欄とチェックだけ、文字列に記号を付けるボタンは「書式」（2026-10-25 班長指示）。［見出し］
+    # ［箇条書き］［段落番号］は「書式」の左端の列、その右の列に［太字］［傍点］［均等割付］（2026-10-27 班長指示）
     found = {str(b.cget("text")): b for b in _all_buttons(window)}
-    for text, k in (("見出し", 2), ("箇条書き", 2), ("段落番号", 2), ("太字", 3), ("傍点", 3), ("均等割付", 3), ("表題", 3)):
-        assert found[text].master is rb.groups[k].body, text
-    assert [int(found[t].grid_info()["row"]) for t in ("見出し", "箇条書き", "段落番号")] == [0, 1, 2]
+    assert not any(b.master is rb.groups[2].body for b in found.values())
+    for text in ("見出し", "箇条書き", "段落番号", "太字", "傍点", "均等割付", "表題"):
+        assert found[text].master is rb.groups[3].body, text
+    cells = {t: (int(found[t].grid_info()["column"]), int(found[t].grid_info()["row"]))
+             for t in ("見出し", "箇条書き", "段落番号", "太字", "傍点", "均等割付")}
+    assert cells == {"見出し": (0, 0), "箇条書き": (0, 1), "段落番号": (0, 2), "太字": (1, 0), "傍点": (1, 1), "均等割付": (1, 2)}
     rb.reflow(10 ** 6)
     window.update_idletasks()
     full = sum(g.winfo_reqwidth() for g in rb.groups)
@@ -1305,8 +1309,11 @@ def test_close_document_starts_new_one(window, monkeypatch):
     assert not window.on_close_document()                          # キャンセルなら閉じない
     assert asked and window.session.doc_id == old_id
     monkeypatch.setattr(messagebox, "askyesnocancel", lambda *a, **k: False)   # 保存しない
-    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
-    assert window.on_close_document()
+    # 仮名化した語の一覧が消えることは尋ねない（2026-10-27 班長指示）
+    yesno = []
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: yesno.append(a[1]) or False)
+    assert window.session.dictionary.entries and window.on_close_document()
+    assert not yesno
     assert window.session.doc_id != old_id and window.raw_text() == "" and window.winfo_exists()
     # 閉じた後（エディターが空）は「開かれていません」、書いたが保存していなければ「保存していません」
     assert str(window.doc_id_label.cget("text")) == "構文（VAMD）ファイル：（開かれていません）"
@@ -1491,7 +1498,7 @@ def test_no_commands_for_reusing_documents(window):
                 yield str(c.cget("text")).replace("\n", "")
             yield from texts(c)
     found = set(texts(window))
-    assert "開く" in found and "変更" in found and "解除" in found
+    assert "開く" in found and not found & {"変更", "解除"}       # 一覧の横の［解除］［変更］も置かない（2026-10-27 班長指示）
     assert not found & {"コピーとして開く", "名前を付けて保存", "すべて解除"}
     assert not window.bind("<F12>")
     assert not hasattr(window, "on_save_as") and not hasattr(window, "on_open_copy") and not hasattr(window, "on_unregister_all")
@@ -1586,3 +1593,36 @@ def test_register_dialog_requires_letters(window, monkeypatch):
     assert EditDialog(window, d.find("〔人名ＹＴ〕"), d).result is None
     assert seen["edit"] == "ＹＴ"                       # 2字以上の記号も、その字を入れて開く
 
+
+def test_edit_dialog_unregisters(window, monkeypatch):
+    """一覧の横に［解除］［変更］のボタンを置かず、題の右に「（ダブルクリックで編集）」と書く。行のダブルクリックで開く
+    変更の画面の［解除］で、確かめてから仮名化を解除する（2026-10-27 班長指示）。"""
+    from tkinter import ttk
+    from va_document.dialogs import UNREGISTER, EditDialog
+
+    def labels(w):
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Label):
+                yield str(c.cget("text"))
+            yield from labels(c)
+    assert "（ダブルクリックで編集）" in set(labels(window))
+    d = window.session.dictionary                     # 甲野太郎＝〔人名Ａ〕
+    answers, asked = iter([False, True]), []
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(a[1]) or next(answers))
+    seen = {}
+
+    def run():
+        dlg = [c for c in window.winfo_children() if isinstance(c, EditDialog)][-1]
+        dlg.unregister()                               # ［いいえ］：画面に戻る
+        seen["after_no"] = dlg.winfo_exists()
+        dlg.unregister()                               # ［はい］
+    window.after(200, run)
+    assert EditDialog(window, d.find("〔人名Ａ〕"), d).result == UNREGISTER
+    assert seen["after_no"] and len(asked) == 2 and "「甲野太郎」（〔人名Ａ〕）の仮名化を解除しますか" in asked[0]
+    # 一覧の行から開いて解除すると、エディターの記号が元の語に戻り、一覧から消える
+    from types import SimpleNamespace
+    monkeypatch.setattr(ai_ops, "EditDialog", lambda parent, e, dic: SimpleNamespace(result=UNREGISTER))
+    window.tree.selection_set("〔人名Ａ〕")
+    window.on_edit_entry()
+    assert "〔人名Ａ〕" not in window.raw_text() and window.raw_text() == window.real_text() == TEXT
+    assert window.tree.get_children() == () and "仮名化を解除しました" in str(window.status.cget("text"))

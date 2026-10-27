@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from . import APP_NAME, vamd
-from .dialogs import ChangedOutsideDialog, EditDialog, RegisterDialog
+from .dialogs import UNREGISTER, ChangedOutsideDialog, EditDialog, RegisterDialog
 from .pseudonym import KINDS, NotRegistrable, trim_selection
 
 
@@ -47,15 +47,6 @@ class AiMixin:
         self._update_title()
         self.status.configure(text=f"「{word}」を {token} として仮名化しました。")
 
-    def on_unregister(self):
-        sel = self.tree.selection()
-        if not sel:
-            messagebox.showinfo(APP_NAME, "左の一覧で、解除する語を選んでから押してください。", parent=self)
-            return
-        e = self.session.dictionary.find(sel[0])
-        if e and messagebox.askyesno(APP_NAME, f"「{e.word}」（{e.token}）の仮名化を解除しますか？", parent=self):
-            self._unregister(e.token)
-
     def _unregister(self, token):
         e = self.session.dictionary.find(token)
         if e:
@@ -70,18 +61,21 @@ class AiMixin:
             self.status.configure(text=f"「{e.word}」（{e.token}）の仮名化を解除しました。")
 
     def on_edit_entry(self):
-        """一覧で選んだ語の、記号と元の語を変える（一覧の行のダブルクリックでも。2026-10-25 班長決定）。元の語を直すと
+        """一覧の行をダブルクリックしたとき、その語の記号と元の語を変える（2026-10-25 班長決定）。元の語を直すと
         文章の中のその記号がすべて新しい語になり、新しい語がエディターに実名のままあれば記号にする。記号を変えると、
-        エディターの記号も変える（前の記号を別の語に付けるときは、画面で確かめる）。"""
+        エディターの記号も変える（前の記号を別の語に付けるときは、画面で確かめる）。画面の［解除］で、仮名化を解除する
+        （2026-10-27 班長指示。一覧の横の［解除］［変更］のボタンは置かない）。"""
         sel = self.tree.selection()
         if not sel:
-            messagebox.showinfo(APP_NAME, "左の一覧で、変える語を選んでから押してください。", parent=self)
             return
         e = self.session.dictionary.find(sel[0])
         if e is None:
             return
         chosen = EditDialog(self, e, self.session.dictionary).result
         if chosen is None:
+            return
+        if chosen == UNREGISTER:
+            self._unregister(e.token)
             return
         try:
             old_word, old_token = self.session.edit(e.token, *chosen)

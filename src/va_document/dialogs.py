@@ -137,12 +137,19 @@ class RegisterDialog(_Dialog, _TokenFields):
             self.destroy()
 
 
+# 変更の画面で［解除］を押したときの result
+UNREGISTER = "unregister"
+
+
 class EditDialog(_Dialog, _TokenFields):
-    """仮名化した語の記号と元の語を変える（2026-10-25 班長決定）。result は (元の語, 種別, 英字)。"""
+    """仮名化した語の記号と元の語を変える（2026-10-25 班長決定）。result は (元の語, 種別, 英字)。
+    画面の下の［解除］で仮名化を解除する（確かめてから。result は UNREGISTER。2026-10-27 班長指示で、一覧の横の
+    ［解除］［変更］のボタンをやめ、この画面に移した）。"""
 
     def __init__(self, parent, entry, dictionary):
         super().__init__(parent, "記号・元の語の変更")
         self.result = None
+        self.entry = entry
         body = ttk.Frame(self, padding=(16, 14, 16, 4))
         body.pack(fill="both")
         ttk.Label(body, text=f"{entry.token}（{entry.word}）の、元の語と記号を変えます。",
@@ -159,7 +166,9 @@ class EditDialog(_Dialog, _TokenFields):
                   "記号を変えると、エディターの記号も変わります（前の書面と記号をそろえるときなど）。\n"
                   "AI の前の回答にある前の記号は、取り込むときに「仮名化した語にない記号」として知らせます。",
                   style="Note.TLabel", justify="left").pack(anchor="w", pady=(8, 0))
-        self.buttons("変える", self.ok)
+        bar = self.buttons("変える", self.ok)
+        # ［解除］は、［変える］［やめる］から離して左端に置く
+        ttk.Button(bar, text="解除", command=self.unregister).pack(side="left")
         self.bind("<Return>", lambda e: self.ok())
         box.select_range(0, "end")
         box.focus_set()
@@ -172,6 +181,14 @@ class EditDialog(_Dialog, _TokenFields):
         token = self.checked_token()
         if token is not None:
             self.result = (self.word.get(), *token)
+            self.destroy()
+
+    def unregister(self):
+        """仮名化を解除する（エディターの記号は元の語に戻る）。［いいえ］なら画面に戻る。"""
+        e = self.entry
+        if messagebox.askyesno(APP_NAME, f"「{e.word}」（{e.token}）の仮名化を解除しますか？\n"
+                               "エディターの記号は、元の語に戻ります。", parent=self):
+            self.result = UNREGISTER
             self.destroy()
 
 
