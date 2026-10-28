@@ -2,17 +2,21 @@
 # VA Document の実行ファイル（dist\VA_Document.exe）を作る（VA mints の mints_prep.spec と同じ作り）。
 # 作り方：pyinstaller va_document.spec --noconfirm
 
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+
 
 a = Analysis(
     ['main.py'],
     pathex=['src'],
-    binaries=[],
+    # エクスプローラーからのドラッグアンドドロップ（tkinterdnd2 の tkdnd。Tcl のファイルと DLL。VA FAX の motfax.spec と同じ）
+    binaries=collect_dynamic_libs('tkinterdnd2'),
     # ・ボタンのアイコン（Fluent UI System Icons の SVG と LICENSE）。icons.py は va_document\icons から読む
     # ・ウィンドウ（タイトルバー・タスクバー）のアイコン。exe そのもののアイコンは EXE(icon=...) で埋め込むが、
     #   Tk のウィンドウには、実行時にファイルとして読ませる必要があるため、展開先（sys._MEIPASS）に入れる
     # ・同梱の IPA書体（assets/fonts。Mac などで使う）は入れない（Windows ではＭＳ 明朝を使う。pdfwriter.DEFAULT_FONTS）
-    datas=[('src/va_document/icons', 'va_document/icons'), ('assets/VA_Document.ico', 'assets')],
-    hiddenimports=[],
+    datas=[('src/va_document/icons', 'va_document/icons'), ('assets/VA_Document.ico', 'assets')]
+          + collect_data_files('tkinterdnd2'),
+    hiddenimports=['tkinterdnd2'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

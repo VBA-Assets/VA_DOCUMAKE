@@ -1,6 +1,6 @@
 """VA Document が使っている部品のライセンスの表示（THIRD_PARTY_NOTICES.txt）を作る。
 
-exe に入る部品（Python・Tcl/Tk・PyMuPDF・ReportLab・fontTools・Pillow・PyInstaller のブートローダー）と、
+exe に入る部品（Python・Tcl/Tk・PyMuPDF・ReportLab・fontTools・Pillow・tkinterdnd2・tkdnd・PyInstaller のブートローダー）と、
 ボタンのアイコン（Fluent UI System Icons）のライセンスの全文を、いま入っている部品のファイルから集める。
 部品の版を上げたら、作り直してコミットする。
 
@@ -17,6 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "THIRD_PARTY_NOTICES.txt"
 PY_HOME = Path(sys.base_prefix)
+# tkdnd の使用許諾は、tkdnd.tcl の先頭に書いてある（tkinterdnd2 に別のファイルがない）
+TKDND_TCL = Path(metadata.distribution("tkinterdnd2").locate_file("tkinterdnd2/tkdnd/win-x64/tkdnd.tcl"))
 
 # (表示する名前, 配布の名前〔版を読む。None は Python〕, 用途, ライセンス, 全文のファイル)
 COMPONENTS = [
@@ -28,6 +30,9 @@ COMPONENTS = [
     ("fontTools", "fonttools", "書体の埋め込みの許可の確かめ", "MIT License",
      ["licenses/LICENSE", "licenses/LICENSE.external"]),
     ("Pillow", "pillow", "アイコンの画像", "MIT-CMU License", ["licenses/LICENSE"]),
+    ("tkinterdnd2", "tkinterdnd2", "エクスプローラーからのドラッグアンドドロップ", "MIT License", ["licenses/LICENSE"]),
+    ("tkdnd 2.10.1", None, "エクスプローラーからのドラッグアンドドロップ（tkinterdnd2 に入っている Tk の拡張）",
+     "BSD 形式（Tcl/Tk と同じ条項）", [TKDND_TCL]),
     ("PyInstaller", "pyinstaller", "実行ファイルの作成（ブートローダーが exe に入る）",
      "GNU General Public License 第2版以降（ブートローダーの例外条項付き）", ["licenses/COPYING.txt"]),
     ("Fluent UI System Icons", None, "ボタンのアイコン（［傍点］のアイコンを除く）", "MIT License",
@@ -48,7 +53,16 @@ def _license_files(dist: str | None, files: list) -> list[tuple[str, str]]:
             if not path.exists():
                 matches = [p for p in metadata.distribution(dist).files or [] if str(p).replace("\\", "/").endswith(f)]
                 path = Path(metadata.distribution(dist).locate_file(matches[0])) if matches else path
-        out.append((path.name, path.read_text(encoding="utf-8-sig", errors="replace")))
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        if path.suffix == ".tcl":
+            # Tcl のファイル（tkdnd.tcl）は、先頭のコメント（著作権と使用許諾）だけを写す
+            head = []
+            for line in text.splitlines():
+                if not line.startswith("#"):
+                    break
+                head.append(line[2:] if line.startswith("# ") else line[1:])
+            text = "\n".join(head).strip("\n") + "\n"
+        out.append((path.name, text))
     return out
 
 

@@ -33,7 +33,7 @@ def chars(path):
 @pytest.fixture(scope="module")
 def saiban_pdf(tmp_path_factory):
     dt = DOC_TYPES["Saiban"]
-    ts = Typesetter(dt)
+    ts = Typesetter(dt, keep=False)     # VA公用文の PDF と比べるので、見出しと本文を分けない処理をしない
     lines = ts.layout(parse((DATA / "裁判所" / "見本.md").read_text(encoding="utf-8").splitlines(), dt))
     path = tmp_path_factory.mktemp("pdf") / "準備書面.pdf"
     write_pdf(ts, lines, str(path), doc_id="K7Q29XMD", version=3)

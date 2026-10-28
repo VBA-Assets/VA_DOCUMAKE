@@ -8,9 +8,10 @@ import re
 import tkinter as tk
 
 from . import vamd
-from .document import (BULLET, BULLET_MARK, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN,
+from .document import (BLANK, BULLET, BULLET_MARK, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN,
                        DISTRIBUTE_RE, HEADING, HEADING_BUTTON_MARK, HEADING_MARK_RE, INDENT_MARK, LEAD_ALIGN_MARKS,
-                       LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, NUMBER_MARK, RIGHT_MARK, TABLE, area_of,
+                       LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, NUMBER_MARK, PAGE_BREAK, RIGHT_MARK, SECTION_BREAK,
+                       TABLE, TOC, area_of,
                        cell_separators, has_inline_marks, inline_mark_spans, is_line_mark, is_table_line, lead_mark_len,
                        leading_wrap,
                        move_wraps_after_marks, parse, remove_bold, split_inline, split_lead_marks)
@@ -271,6 +272,82 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
                     self.text.insert(f"{k}.0", new)
         self.text.tag_remove("sel", "1.0", "end")
         self.text.mark_set("insert", insert)
+
+    # ---------- 見出しの前の空行（2026-10-28 班長決定） ----------
+    # VAスタイルの「段落前に1行空ける」に当たる。［太字］で同じ段の見出しをそろえるのと同じく、見出しの行全体（または
+    # 見出しの字すべて）を選んで Enter を押すと、その段と上の段の見出しの前に空行を1行ずつ入れ、前が空行の見出しで
+    # 同じ操作をすると、その段と下の段の見出しの前の空行を1行ずつ外す（VAスタイルが上の段から順に書式を変えるのと
+    # 同じく、空ける段は上から続く。ボタンは置かない。選ばずに押した Enter・Backspace は、ふつうの改行・削除のまま。
+    # 1か所だけ空ける・詰めるときに使う）。マークダウンの空行として書き、Ctrl+Z 1回で戻せる。
+    # はじめは見出しの行の先頭の Enter・Backspace で行ったが、ふつうの改行と見分けにくいので改めた（2026-10-28 班長指示）
+
+    def on_editor_return(self, event=None):
+        """エディターの Enter。見出しの行全体（または見出しの字すべて）を選んで押したら、見出しの前の空行を入れる
+        （その段と上の段）・外す（その段と下の段）。"break" を返す。そうでなければ None（エディターのもとの働きのまま）。"""
+        line = self._selected_heading_line()
+        if line is None:
+            return None
+        self._heading_space(line)
+        return "break"
+
+    def _selected_heading_line(self):
+        """見出しの行全体（行末の改行を含んでも含まなくてもよい）か、見出しの字すべて（# の後。［太字］と同じ）を
+        選んでいれば、その行の番号。そうでなければ None。"""
+        sel = self._sel_range()
+        if not sel:
+            return None
+        a, b = sel
+        n = int(a.split(".")[0])
+        if n not in self._heading_lines():
+            return None
+        if a == f"{n}.0" and self.text.compare(b, ">=", f"{n}.end") and self.text.compare(b, "<=", f"{n + 1}.0"):
+            return n                    # 行全体
+        if int(b.split(".")[0]) != n:
+            return None
+        parts = _split_heading(self.text.get(f"{n}.0", f"{n}.end"))
+        if parts is None or not split_inline(parts[1])[0].strip(" 　"):
+            return None
+        if split_inline(self.text.get(a, b))[0].strip(" 　") == split_inline(parts[1])[0].strip(" 　"):
+            return n                    # 見出しの字すべて
+        return None
+
+    def _heading_space(self, line):
+        """line 行目の見出しの前の空行をそろえる。その見出しのすぐ上の行が空行なら、その段と下の段（# の多い段）の
+        見出しの前の空行を外し、そうでなければ、その段と上の段の見出しの前に入れる（2026-10-28 班長指示）。入れるときは、
+        二重に空けないよう、ほかの見出しのうち、文書の先頭・改ページとセクション区切りの直後・直前が空行（中身のない
+        配置の行も）・直前が見出しのものには入れない（選んだ見出しには、選んだとおり入れる）。ページの先頭に来た空行は、
+        組むときに詰める（layout）。"""
+        paras = [p for p in parse(self.raw_text().split("\n"), self.session.doc_type) if not p.area]
+        heads = {p.src_line + 1: k for k, p in enumerate(paras) if p.kind == HEADING}
+
+        def before(k):
+            return paras[k - 1] if k else None
+        mine = before(heads[line])
+        release = mine is not None and mine.kind == BLANK and mine.src_line + 2 == line
+        level = paras[heads[line]].level
+        targets = []        # 空行を入れる見出しの行・外す空行の行（エディターの行の番号）
+        for n, k in heads.items():
+            p, b = paras[k], before(k)
+            if (p.level < level) if release else (p.level > level):
+                continue
+            if n == line:
+                targets.append(n - 1 if release else n)
+            elif b is None:
+                continue
+            elif release:
+                if b.kind == BLANK:
+                    targets.append(b.src_line + 1)
+            elif b.kind not in (BLANK, HEADING, PAGE_BREAK, SECTION_BREAK) and (b.kind in (TABLE, TOC)
+                                                                               or b.number or b.text):
+                targets.append(n)
+        with undoable(self.text):
+            for n in sorted(targets, reverse=True):
+                if release:
+                    self.text.delete(f"{n}.0", f"{n + 1}.0")
+                else:
+                    self.text.insert(f"{n}.0", "\n")
+        self.text.tag_remove("sel", "1.0", "end")
+        self.text.see("insert")
 
     def _sel_range(self, insert=False):
         """選んだ範囲の (先頭, 末尾) の位置。選んでいなければ、insert が真ならカーソルの位置を2つ、偽なら None。"""

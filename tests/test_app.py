@@ -187,6 +187,35 @@ def test_open_dialog_lists_all_openable_files_first(window, tmp_path, monkeypatc
     assert window.text.get("1.0", "end-1c").rstrip("\n") == "# 認否\n認める。"
 
 
+def test_drop_file_from_explorer(window, tmp_path, monkeypatch):
+    """エクスプローラーからファイルを落として開く（2026-10-28 班長指示。tkinterdnd2）。落とす先は左右の枠・確認表示・
+    エディター。開くのは1つだけで、2つ以上・フォルダ・開けない種類は開かずに知らせる。保存していない変更があれば
+    先に尋ねる（［開く］と同じ）。"""
+    pytest.importorskip("tkinterdnd2")
+    assert window.file_drop
+    for w in (window.panes, window.canvas, window.text):
+        assert "<<Drop>>" in w.bind()
+    shown, asked = [], []
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: shown.append(a[1]))
+    monkeypatch.setattr(messagebox, "askyesnocancel", lambda *a, **k: asked.append(a[1]) or False)
+    md = tmp_path / "落とした 文書.md"           # 空白を含む名前（tkdnd は {} で囲む）
+    md.write_text("# 認否\n認める。", encoding="utf-8")
+    other = tmp_path / "書面.docx"
+    other.write_bytes(b"PK")
+    for data in (f"{{{md}}} {{{md}}}", f"{{{tmp_path}}}", str(other)):
+        window.open_dropped(file_ops.dropped_paths(data))
+    assert len(shown) == 3 and "1つだけ" in shown[0] and "開けません" in shown[1] and "書面.docx" in shown[2]
+    assert not asked and window.raw_text() == PSEUDO            # どれも、エディターは変わらない
+    window.open_dropped(file_ops.dropped_paths(f"{{{md}}}"))
+    assert asked                                                # 保存していない変更があるので、先に尋ねた
+    assert window.raw_text().rstrip("\n") == "# 認否\n認める。"
+
+
+def test_dropped_paths_keep_backslashes():
+    """Windows のパス（円記号）と空白を含むパスを壊さない。"""
+    assert file_ops.dropped_paths(r"{C:\Users\a b\文書.vamd} C:\x\y.pdf") == [r"C:\Users\a b\文書.vamd", r"C:\x\y.pdf"]
+
+
 def test_paste_rejects_other_document_and_plain_text(window, tmp_path, monkeypatch):
     shown = []
     monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: shown.append(("error", a[1])))
@@ -1005,6 +1034,103 @@ def test_bold_on_heading_line_applies_to_same_level(window):
     window.text.mark_set("insert", "1.1")
     window.on_bold()
     assert window.raw_text().startswith("本文。")
+
+def test_heading_space_by_selecting_heading(window):
+    """見出しの行全体（または見出しの字すべて）を選んで Enter を押すと、同じ段の見出しの前に空行を1行ずつ入れ、
+    前が空行の見出しで同じ操作をすると外す（［太字］と同じ切り替え。2026-10-28 班長決定）。ほかの見出しには、
+    文書の先頭・改ページの直後・直前が空行・直前が見出しのときは入れない。Ctrl+Z 1回で戻る。"""
+    src = "# 第一\n## 小\n本文。\n# 第二\n本文。\n\n# 第三\n本文。\n<<<\n# 第四\n本文。\n## 小２\n本文。"
+
+    def lines():
+        return window.raw_text().rstrip("\n").split("\n")
+
+    def select(a, b):
+        window.text.tag_remove("sel", "1.0", "end")
+        window.text.tag_add("sel", a, b)
+        window.text.mark_set("insert", b)
+    assert window.text.bind("<Return>") and not window.text.bind("<BackSpace>")
+    window._load_text(src)
+    select("4.0", "4.end")                               # 行全体（改行を含まない）
+    assert window.on_editor_return() == "break"
+    # 「# 第二」の前だけに入る（第一は文書の先頭、第三は前が空行、第四は改ページの直後。## は段が違う）
+    assert lines() == ["# 第一", "## 小", "本文。", "", "# 第二", "本文。", "", "# 第三", "本文。", "<<<", "# 第四", "本文。",
+                       "## 小２", "本文。"]
+    assert not window.text.tag_ranges("sel")
+    select("5.2", "5.end")                               # 見出しの字すべて（前が空行の見出し）：外す
+    assert window.on_editor_return() == "break"
+    assert lines() == ["# 第一", "## 小", "本文。", "# 第二", "本文。", "# 第三", "本文。", "<<<", "# 第四", "本文。",
+                       "## 小２", "本文。"]
+    window.text.edit_undo()                              # Ctrl+Z 1回で、外す前に戻る
+    assert lines()[3:8] == ["", "# 第二", "本文。", "", "# 第三"]
+    # 行末の改行まで選んだときも行全体。選んだ見出しには、前が見出しでも選んだとおり入れ、同じ段のほかの見出しには
+    # 規則どおり入れる
+    window._load_text(src)
+    select("2.0", "3.0")
+    assert window.on_editor_return() == "break"
+    assert lines()[:3] == ["# 第一", "", "## 小"] and lines()[-3:] == ["", "## 小２", "本文。"]
+    # 選んでいないとき（見出しの行の先頭でも）・見出しの一部・本文の行・2行にまたがる選択では、エディターのもとの
+    # 働きのまま（None を返す）
+    window._load_text(src)
+    window.text.tag_remove("sel", "1.0", "end")
+    window.text.mark_set("insert", "4.0")
+    assert window.on_editor_return() is None
+    for a, b in (("4.2", "4.3"), ("3.0", "3.end"), ("4.0", "5.end")):
+        select(a, b)
+        assert window.on_editor_return() is None, (a, b)
+    window.text.tag_remove("sel", "1.0", "end")
+    assert window.raw_text().rstrip("\n") == src
+
+
+def test_heading_space_sets_upper_levels_and_releases_lower_levels(window):
+    """下の段の見出しで入れると、上の段の見出しの前にも入れ、上の段の見出しで外すと、下の段の見出しの前の空行も外す
+    （VAスタイルが上の段から順に書式を変えるのと同じ。2026-10-28 班長指示）。"""
+    src = "前書き。\n# 第一\n本文。\n## 小一\n本文。\n### 細一\n本文。\n# 第二\n本文。\n## 小二\n本文。\n### 細二\n本文。"
+
+    def lines():
+        return window.raw_text().rstrip("\n").split("\n")
+
+    def select_heading(text):
+        n = lines().index(text) + 1
+        window.text.tag_remove("sel", "1.0", "end")
+        window.text.tag_add("sel", f"{n}.0", f"{n}.end")
+        window.text.mark_set("insert", f"{n}.end")
+        assert window.on_editor_return() == "break"
+    window._load_text(src)
+    select_heading("## 小二")                             # 段2で入れる：段1・段2に入り、段3には入らない
+    assert lines() == ["前書き。", "", "# 第一", "本文。", "", "## 小一", "本文。", "### 細一", "本文。", "", "# 第二", "本文。",
+                       "", "## 小二", "本文。", "### 細二", "本文。"]
+    select_heading("### 細一")                            # 段3で入れる：段3にも入る（段1・段2は入ったまま）
+    assert lines().count("") == 6
+    select_heading("## 小一")                             # 段2で外す：段2・段3が外れ、段1は残る
+    assert lines() == ["前書き。", "", "# 第一", "本文。", "## 小一", "本文。", "### 細一", "本文。", "", "# 第二", "本文。",
+                       "## 小二", "本文。", "### 細二", "本文。"]
+    window.text.edit_undo()                              # Ctrl+Z 1回で、外す前に戻る
+    assert lines().count("") == 6
+    select_heading("# 第二")                              # 段1で外す：すべて外れる
+    assert window.raw_text().rstrip("\n") == src
+
+
+def test_heading_space_keys_reach_the_editor(window):
+    """実際の Enter のキーで働く。選ばずに押した Enter・Backspace は、見出しの行の先頭でもふつうの改行・削除になる。
+    Ctrl+Enter は改ページのまま。"""
+    _focus_editor(window)
+    window._load_text("# 第一\n本文。\n# 第二\n本文。")
+    window.text.tag_add("sel", "3.0", "3.end")
+    window.text.mark_set("insert", "3.end")
+    window.text.event_generate("<Return>")
+    assert _lines(window, 1, 5) == ["# 第一", "本文。", "", "# 第二", "本文。"]
+    window.text.tag_remove("sel", "1.0", "end")
+    window.text.mark_set("insert", "4.0")                # 見出しの行の先頭の Backspace：その空行だけを消す
+    window.text.event_generate("<BackSpace>")
+    assert _lines(window, 1, 4) == ["# 第一", "本文。", "# 第二", "本文。"]
+    window._load_text("# 第一\n本文。\n# 第二\n本文。")
+    window.text.mark_set("insert", "3.0")                # 見出しの行の先頭の Enter：ふつうの改行（その見出しだけ）
+    window.text.event_generate("<Return>")
+    assert _lines(window, 1, 5) == ["# 第一", "本文。", "", "# 第二", "本文。"]
+    window.text.mark_set("insert", "4.0")
+    window.text.event_generate("<Control-Return>")       # 改ページ
+    assert _lines(window, 4, 4) == ["<<<"]
+
 
 def test_marks_wrapped_in_bold_in_editor(window):
     """「**:=: 準備書面**」の記号も青く示し、［中央］で付け替えられる。AI の回答で太字に囲まれても、

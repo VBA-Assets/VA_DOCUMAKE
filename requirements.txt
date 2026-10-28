@@ -10,6 +10,10 @@ PyMuPDF>=1.24
 # 書体ファイルの埋め込みの許可（fsType）の確認
 fonttools>=4.40
 
+# エクスプローラーからのドラッグアンドドロップ（Windows・Mac 用の tkdnd を同梱。VA FAX と同じ。
+# なくても、落とせないだけで動く）
+tkinterdnd2>=0.6
+
 # テスト
 pytest>=8.0
 

@@ -125,10 +125,15 @@ class TablePiece:
 
 
 class Typesetter:
-    def __init__(self, dt, page_number=PAGE_NUMBER_BOTTOM_CENTER):
-        """dt は文書の種類、page_number はページ番号の位置（ヘッダー・フッターをページ番号の直下・直上に置くため）。"""
+    def __init__(self, dt, page_number=PAGE_NUMBER_BOTTOM_CENTER, keep=True):
+        """dt は文書の種類、page_number はページ番号の位置（ヘッダー・フッターをページ番号の直下・直上に置くため）。
+
+        keep が真なら、見出しと次の本文を別のページに分けず、1ページに収まる表を途中で分けず、分けた表は見出しの行を
+        繰り返し、ページの先頭に来た見出しの直前の空行を詰める（2026-10-28 班長決定。VA公用文はどれも行わないので、
+        VA公用文と比べる試験では偽にする）。"""
         self.dt = dt
         self.page_number = page_number
+        self.keep = keep
         self.page_number_shift = {}     # ページ → ページ番号をずらす量（ヘッダー・フッターが余白に入りきらないとき）
         self.warnings = []              # 利用者に知らせること（ヘッダーが本文に重なるなど）
         self.tables = []                # 組んだ表（TablePiece。layout で作り直す）
@@ -375,6 +380,7 @@ class Typesetter:
         sections = [{"start": 1, HEADER: [], FOOTER: []}]
         out = []
         row = 0
+        forced_top = 0      # 改ページ・セクション区切りで改めたページの先頭の行（文書の先頭も）
         for pi, p in enumerate(paras):
             self.para_rows[pi] = row
             if p.area:
@@ -392,11 +398,15 @@ class Typesetter:
             if p.kind in (PAGE_BREAK, SECTION_BREAK):
                 if row % self.lines_page:
                     row += self.lines_page - row % self.lines_page
+                forced_top = row
                 if p.kind == SECTION_BREAK:
                     self.first_level = None
                     sections.append({"start": row // self.lines_page + 1, HEADER: [], FOOTER: []})
                 continue
             if p.kind == BLANK or not (p.number or p.text):
+                if (self.keep and p.kind == BLANK and row % self.lines_page == 0 and row != forced_top
+                        and self._before_heading(paras, pi)):
+                    continue        # ページの先頭に来た、見出しの直前の空行は詰める（2026-10-28 班長決定）
                 # 空の行・中身のない配置の行（--: だけの行など）は、Word の空の段落と同じく1行使う
                 self.blank_rows.append(row)
                 row += 1
@@ -405,21 +415,19 @@ class Typesetter:
                 self.first_level = p.level
             if p.composite:
                 continue            # 複合見出し：次の見出しと1行にまとめる
-            number, merged, outer, squeeze = p.number, 0, p, ()
-            if p.kind == HEADING:
-                _, number, merged, outer = heading_label(paras, pi)
-                squeeze = squeezed_numbers(paras, pi)
-            left, first, right = self.indents(outer)
-            # 複合見出しは外側の見出しの位置から書き出し、折り返した行は、まとめた段の数だけ右から始める
-            left, first = left + merged * self.pitch, first - merged * self.pitch
-            shift = len(number)
-            items = self.make_items(number + p.text, [(a + shift, b + shift, n) for a, b, n in p.distribute],
-                                    self.text_w - right - left - max(first, 0.0))
-            for a, b in squeeze:
-                items[a:b] = self.squeeze_items(number[a:b])
+            if self.keep and p.kind == HEADING:
+                # 見出しを、続く見出しと次の本文の1行目と同じページに置く（2026-10-28 班長決定）
+                at, need = row % self.lines_page, self._keep_rows(paras, pi)
+                if at and self.lines_page < at + need and need <= self.lines_page:     # 1ページを超えるものは送らない
+                    row += self.lines_page - at
+                    k = pi
+                    while k >= 0 and (k == pi or paras[k].composite):
+                        self.para_rows[k] = row
+                        k -= 1
+            number, right, broken = self._break_para(paras, pi)
             num_left = len(number)
             offset = len(p.number) - len(number)      # 字の番号は、この見出しの番号の1字目を 0 とする（前の番号は負）
-            for start_x, chars, hang, last, trail in self.break_lines(items, left, first, right):
+            for start_x, chars, hang, last, trail in broken:
                 num_here = min(num_left, len(chars))
                 placed = self.place_line(p.align, start_x, chars, hang, last, trail, num_here, right)
                 glyphs = [Glyph(ch, x, k < num_here, offset + k) for k, (ch, x) in enumerate(placed)]
@@ -430,6 +438,70 @@ class Typesetter:
                 row += 1
         self._layout_areas(paras, out, sections)
         return out
+
+    def _break_para(self, paras, pi):
+        """見出し・本文の段落を行に分ける。(番号〔複合見出しはまとめた番号〕, 右インデント, break_lines の行) を返す。"""
+        p = paras[pi]
+        number, merged, outer, squeeze = p.number, 0, p, ()
+        if p.kind == HEADING:
+            _, number, merged, outer = heading_label(paras, pi)
+            squeeze = squeezed_numbers(paras, pi)
+        left, first, right = self.indents(outer)
+        # 複合見出しは外側の見出しの位置から書き出し、折り返した行は、まとめた段の数だけ右から始める
+        left, first = left + merged * self.pitch, first - merged * self.pitch
+        shift = len(number)
+        items = self.make_items(number + p.text, [(a + shift, b + shift, n) for a, b, n in p.distribute],
+                                self.text_w - right - left - max(first, 0.0))
+        for a, b in squeeze:
+            items[a:b] = self.squeeze_items(number[a:b])
+        return number, right, self.break_lines(items, left, first, right)
+
+    def _keep_rows(self, paras, pi):
+        """見出し（pi）を、続く見出しと次の本文の1行目と同じページに置くのに要る行数（2026-10-28 班長決定）。
+
+        見出しの行（折り返した行も）、間の空行、続く見出し（下位の見出しも）を数え、最初の本文の1行目までとする。
+        次が表なら、1ページに収まる表は表全体、収まらない表は見出しの行と最初の行まで。改ページ・セクション区切り・
+        文書の終わりが先に来たら、見出しの行だけ。続く見出しまで入れると1ページを超えるときは、この見出しと
+        次の段落の1行目だけにする（見出しだけの文書でも、なるべく分けないため）。それでも1ページを超えるものは、
+        呼ぶ側で送らない。
+        """
+        saved, rows, pending, short = self.first_level, 0, 0, None
+        try:
+            for k in range(pi, len(paras)):
+                p = paras[k]
+                if p.area or p.composite:
+                    continue
+                if p.kind in (PAGE_BREAK, SECTION_BREAK):
+                    break
+                if p.kind == BLANK or (p.kind not in (TABLE, TOC) and not (p.number or p.text)):
+                    pending += 1
+                    continue
+                if p.kind == HEADING:
+                    if self.first_level is None or p.level < self.first_level:
+                        self.first_level = p.level
+                    n = len(self._break_para(paras, k)[2])
+                elif p.kind == TABLE:
+                    n = -(-(self.table_keep_height(self.table_rows(p)[1]) - 0.01) // self.line_pitch)
+                else:
+                    n = 1
+                if short is None and k > pi:
+                    short = rows + pending + (1 if p.kind == HEADING else n)
+                rows, pending = rows + pending + n, 0
+                if p.kind != HEADING:
+                    break
+        finally:
+            self.first_level = saved
+        if rows > self.lines_page and short is not None:
+            rows = short
+        return int(rows)
+
+    def _before_heading(self, paras, pi):
+        """空行（pi）の後に、空行だけを挟んで見出しが来るか。"""
+        for p in paras[pi + 1:]:
+            if p.area or p.kind == BLANK:
+                continue
+            return p.kind == HEADING
+        return False
 
     # ---------- ヘッダー・フッター（[HEADER] [FOOTER]。2026-10-25 班長指示） ----------
 
@@ -660,41 +732,54 @@ class Typesetter:
             out.append((k, self.place_line(cell_align, start_x, chars, hang, last, trail, 0, 0, inner)))
         return out
 
+    def table_rows(self, p):
+        """表の (列の幅, [(セルごとの組んだ行, 傍点の分の空き, 行の高さ)]）。0 番目が見出しの行。"""
+        t = p.table
+        widths = self.column_widths(t, self.text_w - self.table_left(p))
+        out = []
+        for ri, cells in enumerate([t.header] + t.rows):
+            laid = [self.layout_cell(a, s, widths[k], t.distribute.get((ri, k), ())) for k, (a, s) in enumerate(cells)]
+            n_lines = max([len(c) for c in laid] + [1])
+            extra = DOT_ROW_EXTRA if any((ri, k) in t.dots for k in range(len(cells))) else 0
+            height = (n_lines * CELL_LINE_PITCH + 2 * CELL_PAD_Y + extra
+                      + (DOUBLE_RULE_GAP if ri == 0 and t.double_rule else 0))
+            out.append((laid, extra, height))
+        return widths, out
+
+    def table_keep_height(self, rows):
+        """表の書き出しで、同じページに入れる高さ。1ページに収まる表は表全体、収まらない表は見出しの行と最初の行
+        （2026-10-28 班長決定）。"""
+        total = sum(h for _, _, h in rows)
+        if total <= self.lines_page * self.line_pitch + 0.01:
+            return total
+        return sum(h for _, _, h in rows[:2])
+
     def layout_table(self, p, row, para_index=-1):
         """表を組んで self.tables に入れ、表の次の本文が始まる行（通しの行の番号）を返す。
 
-        表は格子に合わせず、行の高さはセルの中の行数で決める。ページの下に入りきらない行は次のページへ送る
-        （見出しの行は繰り返さない）。表の次の本文は、表の下の端より後の、最初の格子の行から始める。
+        表は格子に合わせず、行の高さはセルの中の行数で決める。1ページに収まる表は途中で分けず、ページの下に
+        入りきらなければ表ごと次のページへ送る。収まらない表は、ページの下に入りきらない行を次のページへ送り、
+        次のページの先頭で見出しの行を繰り返す（Word の「タイトル行の繰り返し」。2026-10-28 班長決定）。
+        表の次の本文は、表の下の端より後の、最初の格子の行から始める。
         """
         t = p.table
-        left = self.table_left(p)
-        widths = self.column_widths(t, self.text_w - left)
-        col_x = [left]
+        widths, rows = self.table_rows(p)
+        col_x = [self.table_left(p)]
         for w in widths:
             col_x.append(col_x[-1] + w)
         page_top = self.margin_top
         page_bottom = self.margin_top + self.lines_page * self.line_pitch
         page = row // self.lines_page + 1
         y = page_top + (row % self.lines_page) * self.line_pitch
+        if self.keep and y > page_top + 0.01 and y + self.table_keep_height(rows) > page_bottom + 0.01:
+            page += 1
+            y = page_top
         piece = TablePiece(page, col_x, para_index=para_index)
         self.tables.append(piece)
-        for ri, cells in enumerate([t.header] + t.rows):
-            is_header = ri == 0
-            laid = [self.layout_cell(a, s, widths[k], t.distribute.get((ri, k), ())) for k, (a, s) in enumerate(cells)]
-            n_lines = max([len(c) for c in laid] + [1])
-            extra = DOT_ROW_EXTRA if any((ri, k) in t.dots for k in range(len(cells))) else 0
-            height = (n_lines * CELL_LINE_PITCH + 2 * CELL_PAD_Y + extra
-                      + (DOUBLE_RULE_GAP if is_header and t.double_rule else 0))
-            if y + height > page_bottom + 0.01 and y > page_top + 0.01:
-                # 次のページへ送る（ページの上から始まる行は、入りきらなくても送らない）
-                page += 1
-                y = page_top
-                if piece.rows:
-                    piece = TablePiece(page, col_x, para_index=para_index)
-                    self.tables.append(piece)
-                else:
-                    piece.page = page
-            piece.rows.append(TableRow(y, y + height, is_header and t.double_rule, ri))
+
+        def put(ri, y):
+            laid, extra, height = rows[ri]
+            piece.rows.append(TableRow(y, y + height, ri == 0 and t.double_rule, ri))
             for k, lines in enumerate(laid):
                 ci = 0
                 for li, placed in lines:
@@ -703,7 +788,21 @@ class Typesetter:
                     for ch, x in placed:
                         piece.glyphs.append(TableGlyph(ch, col_x[k] + CELL_PAD_X + x, base, ri, k, ci))
                         ci += 1
-            y += height
+            return y + height
+
+        for ri, (_, _, height) in enumerate(rows):
+            if y + height > page_bottom + 0.01 and y > page_top + 0.01:
+                # 次のページへ送る（ページの上から始まる行は、入りきらなくても送らない）
+                page += 1
+                y = page_top
+                if piece.rows:
+                    piece = TablePiece(page, col_x, para_index=para_index)
+                    self.tables.append(piece)
+                    if self.keep and ri > 0:
+                        y = put(0, y)       # 見出しの行を繰り返す
+                else:
+                    piece.page = page
+            y = put(ri, y)
         # 表の次の本文は、表の下の端より後の、最初の格子の行から
         rows_used = -(-(y - page_top - 0.01) // self.line_pitch)
         return (page - 1) * self.lines_page + int(rows_used)

@@ -143,6 +143,8 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.bind("<FocusIn>", self._on_focus_in)
         self._find_dialog = None
         self._bind_keys()
+        # エクスプローラーからファイルを落として開く（ウィンドウの中の左右の枠・確認表示・エディター。2026-10-28 班長指示）
+        self.file_drop = self._init_file_drop([self.panes, self.canvas, self.text])
         if open_path:
             self.after(100, lambda: self.open_path(Path(open_path)))
 
@@ -188,6 +190,9 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
             for k in ("i", "I"):
                 for widget in (self, self.text):
                     widget.bind(f"<{mod}-Key-{k}>", lambda e: (self.on_indent(), "break")[1])
+        # 見出しの行を選んで Enter を押すと、同じ段の見出しの前の空行をそろえる（2026-10-28 班長決定。
+        # editor_ops.on_editor_return。Ctrl+Enter〔改ページ〕は上で受けるので、ここには来ない）
+        self.text.bind("<Return>", self.on_editor_return)
         self.text.bind("<Alt-Shift-Left>", lambda e: (self.on_outline(-1), "break")[1])
         self.text.bind("<Alt-Shift-Right>", lambda e: (self.on_outline(1), "break")[1])
         for seq in ("<Control-Shift-Key-N>", "<Control-Shift-Key-n>"):
@@ -346,6 +351,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         for label, mark in (("改ページ", PAGE_BREAK_MARK), ("セクション区切り", SECTION_BREAK_MARK),
                             ("目次", TOC_MARK)):   # 載せる見出しのレベルは手で直す（2026-10-24）
             g.small(label, lambda m=mark: self.on_line_mark(m))
+        # 見出しの前の空行は、ボタンを置かず、見出しの行を選んで Enter を押して同じ段にそろえる（2026-10-28 班長決定）
         # 検索・置換は「編集」の組にする（Word のリボンのホームのタブと同じ名前。2026-10-23 班長決定）
         g = rb.group("編集")
         g.small("検索", lambda: self.on_find(False))

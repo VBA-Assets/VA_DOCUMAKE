@@ -42,7 +42,7 @@ def word_chars(path):
 
 def python_chars(md_path, doc_type):
     dt = DOC_TYPES[doc_type]
-    ts = Typesetter(dt)
+    ts = Typesetter(dt, keep=False)     # VA公用文は見出しと本文を分けない処理をしない
     text, _ = clean(md_path.read_text(encoding="utf-8"))
     lines = ts.layout(parse(text.splitlines(), dt))
     # Word の字には見出し・段落番号の番号が含まれないので、番号の字は除く

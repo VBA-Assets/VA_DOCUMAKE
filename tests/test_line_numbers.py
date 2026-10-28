@@ -81,7 +81,7 @@ def test_line_numbers_match_va_kouyoubun():
     本文の行の基準線にあり、本文の行の位置の違い（0.06〜0.18pt。字の上下の位置の比較で分かっているもの）だけずれる。"""
     from pathlib import Path
     text = (Path(__file__).resolve().parent / "data" / "裁判所" / "見本.md").read_text(encoding="utf-8").splitlines()
-    ts = Typesetter(DT)
+    ts = Typesetter(DT, keep=False)     # VA公用文の PDF と比べるので、見出しと本文を分けない処理をしない
     data = pdf_bytes(ts, ts.layout(parse(text, DT)), line_numbers=True)
     with fitz.open(stream=data, filetype="pdf") as doc:
         assert len(doc) == 3

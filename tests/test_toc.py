@@ -28,7 +28,7 @@ DATA = Path(__file__).parent / "data" / "目次"
 
 def test_toc_matches_va_kouyoubun():
     dt = DOC_TYPES["Saiban"]
-    ts = Typesetter(dt)
+    ts = Typesetter(dt, keep=False)     # VA公用文と比べるので、見出しと本文を分けない処理をしない
     paras = parse(clean((DATA / "見本.md").read_text(encoding="utf-8"))[0].splitlines(), dt)
     lines = ts.layout(paras)
     toc_pi = next(k for k, p in enumerate(paras) if p.kind == TOC)
@@ -127,7 +127,7 @@ def test_toc_leader_matches_va_kouyoubun_pdf():
     ページ番号の手前のますまで並べる。班長が VA公用文で作った PDF と、点・ページ番号の位置が 0.25pt 以内で合うこと。
     折り返した見出しの2行目は、1字ぶら下げにしたので（Word はぶら下げなし）、点の数が違ってよい。"""
     dt = DOC_TYPES["Saiban"]
-    ts = Typesetter(dt)
+    ts = Typesetter(dt, keep=False)     # 同上
     lines = ts.layout(parse(clean((DATA / "見本.md").read_text(encoding="utf-8"))[0].splitlines(), dt))
     with fitz.open(stream=pdf_bytes(ts, lines), filetype="pdf") as ours, fitz.open(DATA / "VA公用文_目次.pdf") as word:
         ro, rw = pdf_rows(ours), pdf_rows(word)

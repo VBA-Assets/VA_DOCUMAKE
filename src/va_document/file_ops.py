@@ -2,6 +2,7 @@
 
 メインの画面（app.MainWindow）の部品（mixin）。
 """
+import re
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -22,8 +23,55 @@ OPEN_FILETYPES = [
     ("すべてのファイル", "*.*")]
 
 
+# エクスプローラーから落として開けるファイルの拡張子（［開く］の「開けるファイル」と同じ）
+DROP_SUFFIXES = (vamd.EXTENSION, ".pdf", ".txt", ".md")
+# 落としたファイルの一覧（tkdnd の文字列。空白を含むパスは {} で囲まれる）
+_DROP_PATH_RE = re.compile(r"\{([^}]*)\}|(\S+)")
+
+
+def dropped_paths(data):
+    """落としたファイルのパスの一覧。Tcl の splitlist はバックスラッシュを解釈して Windows のパスを壊すので、
+    {} と空白だけで分ける（VA FAX の _parse_dropped_paths と同じ）。"""
+    return [braced or bare for braced, bare in _DROP_PATH_RE.findall(data)]
+
+
 class FileMixin:
     """ファイルの操作（MainWindow に混ぜて使う）。"""
+
+    def _init_file_drop(self, widgets):
+        """エクスプローラーからファイルを落として開けるようにする（2026-10-28 班長指示。VA FAX と同じ tkinterdnd2）。
+        widgets は落とす先（ウィンドウの中の左右の枠・確認表示・エディター。ウィンドウ〔tk.Tk〕そのものは、tkinterdnd2 の
+        <<Drop>> を結び付けられない）。tkinterdnd2 がない・読めないとき（ソースから使う Mac など）は、落とせないだけで、
+        ほかは変わらない。落とせるようにできたら True。"""
+        try:
+            from tkinterdnd2 import DND_FILES, TkinterDnD
+            TkinterDnD._require(self)
+            for w in widgets:
+                w.drop_target_register(DND_FILES)
+                w.dnd_bind("<<Drop>>", self._on_file_drop)
+        except Exception:
+            return False
+        return True
+
+    def _on_file_drop(self, event):
+        # 落とす操作が終わってから開く（落としている間に確認の画面を出すと、エクスプローラーが待たされる）
+        self.after(0, lambda: self.open_dropped(dropped_paths(event.data)))
+        return event.action
+
+    def open_dropped(self, paths):
+        """落としたファイルを開く（［開く］と同じ。保存していない変更があれば、先に尋ねる）。開くのは1つだけで、
+        2つ以上・フォルダ・開けない種類（Word など。テキストとして読むと文字化けする）は開かずに知らせる。"""
+        if len(paths) != 1:
+            messagebox.showinfo(APP_NAME, "開くファイルを1つだけ落としてください。", parent=self)
+            return
+        path = Path(paths[0])
+        if path.is_dir() or path.suffix.lower() not in DROP_SUFFIXES:
+            messagebox.showinfo(APP_NAME, f"このファイルは開けません：{path.name}\n開けるのは、構文ファイル（{vamd.EXTENSION}）・"
+                                "書式付きファイル（.pdf）・テキスト（.txt）・マークダウン（.md）です。", parent=self)
+            return
+        if not self._confirm_discard():
+            return
+        self.open_path(path)
 
     def on_open(self):
         if not self._confirm_discard():

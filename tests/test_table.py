@@ -88,8 +88,10 @@ def test_long_table_breaks_between_rows():
     assert pages[0] == 1 and len(pages) >= 2
     bottom = ts.margin_top + ts.lines_page * ts.line_pitch
     assert all(r.bottom <= bottom + 0.01 for p in ts.tables for r in p.rows)
-    # 見出しの行は繰り返さない（2ページ目以降の piece の最初の行は見出しではない）
-    assert sum(len(p.rows) for p in ts.tables) == 60
+    # 2ページ目以降は、先頭で見出しの行を繰り返す（2026-10-28 班長決定）
+    assert all(p.rows[0].index == 0 for p in ts.tables)
+    assert sum(len(p.rows) for p in ts.tables) == 60 + len(pages) - 1
+    assert [r.index for p in ts.tables for r in p.rows if r.index] == list(range(1, 60))
 
 
 def test_table_in_pdf(tmp_path):
