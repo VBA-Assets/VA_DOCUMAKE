@@ -34,7 +34,7 @@ def text_of(ln):
 
 
 def test_marks_are_read_with_other_marks():
-    ps = parse(["[HEADER] 事件番号", "[footer] :-: 事務所", "--: [Header] 右", "[FOOTER] +2 -> 字下げ",
+    ps = parse(["[HEADER] 事件番号", "[footer] :-: 事務所", "--: [Header] 右", "[FOOTER] ->2 　字下げ",
                 "**[HEADER] 太字**", "[HEADER]", "[HEADER]本文", "本文"], SAIBAN)
     assert [(p.area, p.align, p.text) for p in ps] == [
         (HEADER, "justify", "事件番号"), (FOOTER, CENTER, "事務所"), (HEADER, RIGHT, "右"),
@@ -42,14 +42,14 @@ def test_marks_are_read_with_other_marks():
         (None, "justify", "[HEADER]本文"), (None, "justify", "本文")]      # 後ろに空白のないものは記号ではない
     assert (ps[3].left_indent, ps[3].first_indent) == (2, 1)
     assert ps[4].bold == frozenset({0, 1})
-    lead = split_lead_marks("--: [header] +2 本文")
-    assert (lead.align, lead.area, lead.left, lead.rest) == ("--: ", "[header] ", "+2 ", "本文")
+    lead = split_lead_marks("--: [header] ->2 本文")
+    assert (lead.align, lead.area, lead.left, lead.rest) == ("--: ", "[header] ", "->2 ", "本文")
     assert move_wraps_after_marks("**[HEADER] --: 本文**") == "[HEADER] --: **本文**"
 
 
 def test_header_lines_do_not_change_conversion_state():
-    """ヘッダー・フッターの行は、見出しの変換を止めない（右揃え・-> の段落と違う）。見出しにもならない。"""
-    ps = parse(["# 第一", "--: [FOOTER] 以上", "[HEADER] -> 字下げ", "## 第二", "[HEADER] # 見出しではない"], SAIBAN)
+    """ヘッダー・フッターの行は、見出しの変換を止めない（右揃えの段落と違う）。見出しにもならない。"""
+    ps = parse(["# 第一", "--: [FOOTER] 以上", "[HEADER] 　字下げ", "## 第二", "[HEADER] # 見出しではない"], SAIBAN)
     assert [p.kind for p in ps if not p.area] == [HEADING, HEADING]
     assert ps[4].area == HEADER and ps[4].text == "# 見出しではない"
 

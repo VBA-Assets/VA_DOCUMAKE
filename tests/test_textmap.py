@@ -124,7 +124,7 @@ def test_highlight_marks_keep_positions():
 
 
 def test_indent_marks_round_trip():
-    text = "# 認否\n+3 -> インデントの段落。"
+    text = "# 認否\n->3 　インデントの段落。"
     m = session_for(text)
     line = text.splitlines()[1]
     for ch in "イ段。":

@@ -2,6 +2,8 @@
 
 正解は tests/data/<見本>/VA公用文_字の位置.json：班長の Word とは別に起動した Word で、見本を VA公用文 Ver8D3 に
 より整え、1字ずつ Selection.Information で読み取った位置（試作/Make-VaKouyoubunPdf.ps1。2026-10-23）。
+裁判所の正解は、2026-10-28 に、見出しより前の2段落を1字下げた見本（見本.md は `-> `、VA公用文に入れる
+試作/見本_裁判所.md は行頭の全角空白）で作り直した。
 Word の値は画面の画素に丸められているので、左右の位置は 1pt までの差を一致とみなす。
 """
 import difflib

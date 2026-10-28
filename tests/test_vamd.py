@@ -267,13 +267,25 @@ def test_review_ignores_table_separator_colons():
 
 
 def test_review_reports_lost_indent_but_not_changed_count():
-    """AI の回答で +N が消えたら知らせる。字数を変えただけなら知らせない。"""
-    current = ["# 認否", "+2 -> 主張は争う。"]
-    r = vamd.review(answer(["# 認否", "+3 -> 主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
+    """AI の回答で ->N が消えたら知らせる。字数を変えただけなら知らせない。"""
+    current = ["# 認否", "->2 主張は争う。"]
+    r = vamd.review(answer(["# 認否", "->3 主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
     assert not r.lost_marks
-    r = vamd.review(answer(["# 認否", "-> 主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
-    assert [m for m, _ in r.lost_marks] == ["+N"]
-    assert "「+2 」は段落の左インデントを全角2字にする記号" in vamd.PROMPT
+    r = vamd.review(answer(["# 認否", "主張は争う。"]), "K7Q29XMD", 3, current, make_dictionary())
+    assert [m for m, _ in r.lost_marks] == ["->N"]
+    assert "「->2 」は段落の左インデントを全角2字にする記号" in vamd.PROMPT
+
+
+def test_review_reports_lost_first_line_indent():
+    """字下げの全角空白が AI の回答で消えたら知らせる（字下げが効く段落だけ。見出しの後の本文は、読み込むと空白を
+    取り除くので比べない。2026-10-28 班長決定）。"""
+    current = ["　前書き。", "# 認否", "　本文。", "--: 以上", "　後書き。", "->2 　インデント。"]
+    r = vamd.review(answer(current), "K7Q29XMD", 3, current, make_dictionary())
+    assert not r.lost_marks
+    r = vamd.review(answer(["前書き。", "# 認否", "本文。", "--: 以上", "　後書き。", "->2 インデント。"]),
+                    "K7Q29XMD", 3, current, make_dictionary())
+    assert r.lost_marks == [("字下げの空白", "　前書き。"), ("字下げの空白", "->2 　インデント。")]
+    assert "全角空白は、段落の1行目を1字下げる字下げである" in vamd.PROMPT and "「-> 」" not in vamd.PROMPT
 
 
 def test_rebuild_with_distribute(tmp_path):

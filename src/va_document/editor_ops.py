@@ -8,8 +8,8 @@ import re
 import tkinter as tk
 
 from . import vamd
-from .document import (BLANK, BULLET, BULLET_MARK, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN,
-                       DISTRIBUTE_RE, HEADING, HEADING_BUTTON_MARK, HEADING_MARK_RE, INDENT_MARK, LEAD_ALIGN_MARKS,
+from .document import (ALIGN_MARKS, BLANK, BULLET, BULLET_MARK, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN,
+                       DISTRIBUTE_RE, HEADING, HEADING_BUTTON_MARK, HEADING_MARK_RE,
                        LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, NUMBER_MARK, PAGE_BREAK, RIGHT_MARK, SECTION_BREAK,
                        TABLE, TOC, area_of,
                        cell_separators, has_inline_marks, inline_mark_spans, is_line_mark, is_table_line, lead_mark_len,
@@ -377,8 +377,8 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
         return first, last
 
     def on_align(self, mark):
-        """選んだ行（なければカーソルの行）に配置の記号（-> を含む）を付ける。ほかの配置の記号は付け替える
-        （+N は残す）。
+        """選んだ行（なければカーソルの行）に配置の記号を付ける。ほかの配置の記号は付け替える
+        （->N は残す）。
 
         対象の行がすべて既にその記号なら、記号を外して標準（左）に戻す（同じボタンをもう一度押すと解除）。
         表の行では、［中央］［右］は、カーソルのあるセル（選んでいれば、選んだ範囲にかかるセル）の先頭の配置の記号を
@@ -399,19 +399,17 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
 
         def has(norm):
             lead = split_lead_marks(norm)
-            return lead.first if mark == INDENT_MARK else lead.align == mark
+            return lead.align == mark
         release = all(has(norm) for _, _, norm in rows)
         with undoable(self.text):          # 何行あっても、Ctrl+Z 1回で戻せる
             self._align_cells(cells, mark)
             self._align_columns(columns, mark)
             for n, line, norm in rows:
-                # 「**:=: 準備書面**」は「:=: **準備書面**」として扱う。配置の記号と -> は付け替え、
-                # +N・[HEADER] は残す（記号の順は、ヘッダー・配置・インデント・字下げ）
+                # 「**:=: 準備書面**」は「:=: **準備書面**」として扱う。配置の記号は付け替え、
+                # ->N・[HEADER] は残す（記号の順は、ヘッダー・配置・インデント）
                 lead = split_lead_marks(norm)
                 rest = lead.rest
-                align = "" if release or mark == INDENT_MARK else mark
-                indent_first = not release and mark == INDENT_MARK
-                prefix = lead._replace(align=align, first=indent_first, rest="").join()
+                prefix = lead._replace(align="" if release else mark, rest="").join()
                 if norm != line:
                     self.text.delete(f"{n}.0", f"{n}.end")
                     self.text.insert(f"{n}.0", prefix + rest)
@@ -421,9 +419,9 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
                     self.text.insert(f"{n}.0", prefix)
 
     def on_indent(self):
-        """選んだ行（なければカーソルの行）に +1 を付ける。対象の行がすべて既に +N なら外す（ほかの
+        """選んだ行（なければカーソルの行）に ->1 を付ける。対象の行がすべて既に ->N なら外す（ほかの
         ボタンと同じく、もう一度押すと解除。字数は、目次と同じくエディターで手で直す。2026-10-24 班長指示）。
-        既に +N のある行の字数は変えない。見出し・箇条書き・段落番号の行には付けない（付けると見出しなどで
+        既に ->N のある行の字数は変えない。見出し・箇条書き・段落番号の行には付けない（付けると見出しなどで
         なくなるため）。Ctrl+Z 1回で戻せる。"""
         def target(line):
             if not line.strip() or _structural_line(line):
@@ -438,13 +436,13 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
     def on_area(self, mark):
         """選んだ行（なければカーソルの行）を、ヘッダー・フッターの行にする（行頭に [HEADER] [FOOTER] を付ける。
         2026-10-25 班長指示）。もう片方の記号は付け替える。対象の行がすべて既にその記号なら外す（ほかのボタンと同じ）。
-        配置の記号・+N・-> は残す。表・改ページなどの記号の行・区切りの行と、見出し・箇条書き・段落番号の行には
+        配置の記号・->N は残す。表・改ページなどの記号の行・区切りの行と、見出し・箇条書き・段落番号の行には
         付けない（付けると見出しなどでなくなるため。［インデント］と同じ）。Ctrl+Z 1回で戻せる。"""
         def target(line):
             if _structural_line(line):
                 return None
             parts = split_lead_marks(move_wraps_after_marks(line))
-            if not (parts.area or parts.left or parts.first) and (
+            if not (parts.area or parts.left) and (
                     HEADING_MARK_RE.match(parts.rest) or LIST_MARK_RE.match(parts.rest)):
                 return None
             return parts
@@ -547,7 +545,7 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
         """選んだ行（なければカーソルの行）を、見出し（## ）・箇条書き（- ）・段落番号（1. ）にする（2026-10-25 班長指示）。
         ほかの見出し・箇条書き・段落番号の記号は付け替える。対象の行がすべて既にその種類なら、記号を外して本文に
         戻す（見出しは、どのレベルでも見出しとみなす。レベルは、エディターで # の数を直す）。表・改ページなどの記号の行・
-        区切りの行と、配置・+N・->・[HEADER] の記号のある行には付けない（見出しのレベルの上げ下げと同じ）。
+        区切りの行と、配置・->N・[HEADER] の記号のある行には付けない（見出しのレベルの上げ下げと同じ）。
         字のない行は、選んだ行がすべて字のない行のときだけ記号を付け、カーソルを行末に置く（まだ打っていない行を
         見出しなどにしてから書くため。2026-10-25 班長指示）。字のある行と一緒に選んだ字のない行（1行の空き）には
         付けない。Ctrl+Z 1回で戻せる。"""
@@ -566,11 +564,11 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
             self._caret_to_line_end()
 
     def on_plain(self):
-        """標準の本文（左寄せ）にする（Word の Ctrl+Shift+N）。見出し・箇条書き・段落番号・配置の記号を外す。"""
+        """標準の本文（左寄せ）にする（Word の Ctrl+Shift->N）。見出し・箇条書き・段落番号・配置の記号を外す。"""
         def change(line, n):
             if _structural_line(line):
                 return None
-            # 「**:-: # 見出し**」は「:-: # **見出し**」として扱う。配置・+N・-> の記号を外す（ヘッダー・フッターの
+            # 「**:-: # 見出し**」は「:-: # **見出し**」として扱う。配置・->N の記号を外す（ヘッダー・フッターの
             # 記号は、置く場所の記号なので残す。Word の「標準」でも、ヘッダーの段落はヘッダーのまま）
             lead = split_lead_marks(move_wraps_after_marks(line))
             if lead.area:
@@ -646,7 +644,7 @@ def _mark_spans(text):
             if move_wraps_after_marks(body) != body:
                 while leading_wrap(body[off:]):
                     off += len(leading_wrap(body[off:]))
-            # 行頭の配置・+N・-> の記号
+            # 行頭の配置・->N の記号（後ろの字下げの空白は含めない）
             lead = len(body) - off - len(split_lead_marks(body[off:]).rest)
             if lead:
                 start = pos + len(line) - len(body) + off
@@ -664,7 +662,7 @@ def _special_line(line):
     """見出しのレベルを変えない行（表・改ページなどの記号の行・配置の記号の行・区切りの行・空の行）。"""
     lead = split_lead_marks(move_wraps_after_marks(line))
     return (not line.strip() or _structural_line(line)
-            or bool(lead.align or lead.left or lead.first or lead.area))
+            or bool(lead.align or lead.left or lead.area))
 
 
 def _split_heading(line):
@@ -673,7 +671,7 @@ def _split_heading(line):
     rest = line.lstrip(" 　")
     prefix = line[:len(line) - len(rest)]
     rest = move_wraps_after_marks(rest)
-    for mark in LEAD_ALIGN_MARKS:
+    for mark in ALIGN_MARKS:
         if lead_mark_len(rest, mark):
             n = lead_mark_len(rest, mark)
             prefix, rest = prefix + rest[:n], rest[n:]

@@ -40,7 +40,7 @@ def test_distributed_text_is_not_broken_or_stretched():
 def test_large_count_does_not_hang():
     """字数が1行（セル）の幅より大きくても止まらず、割り付ける幅は1行（セル）の幅までにする（2026-10-24、
     大きな字数を入れると画面が固まった）。"""
-    ts, paras, lines = layout(["# 見出し", "[原告]{99}甲野太郎", "+30 [被告]{20}乙山", "| [代理人]{99} | 金額 |",
+    ts, paras, lines = layout(["# 見出し", "[原告]{99}甲野太郎", "->30 [被告]{20}乙山", "| [代理人]{99} | 金額 |",
                                "|---|---|", "| 原告 | 1 |"])
     by = {}
     for ln in lines:

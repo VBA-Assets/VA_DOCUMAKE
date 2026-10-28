@@ -32,14 +32,14 @@ def test_line_marks():
 
 def test_symbol_marks_need_space_or_line_end():
     """記号で表す行頭の記号（2026-10-25 班長決定）も、後ろに半角空白があるときだけ記号とする（行末なら空白は
-    なくてよい）。電話番号の「+81 3-…」、箇条書きに似た「+ 」、行の途中の記号は、字のまま残す。"""
-    ps = parse([":=:準備書面", "--:", "->前文", "+2本文", "+81 3-1234-5678", "+ 項目", "＋２ 全角", "+2 1. 番号にしない",
+    なくてよい）。電話番号の「+81 3-…」、箇条書きに似た「+ 」、前の版の「＋２ 」「-> 」、行の途中の記号は、字のまま残す。"""
+    ps = parse([":=:準備書面", "--:", "->前文", "->2本文", "+81 3-1234-5678", "+ 項目", "＋２ 全角", "->2 1. 番号にしない",
                 "<<<<", "<<< 改ページ", "[toc]", "[TOC：２]", "[目次]"], SAIBAN)
     assert [(p.align, p.text) for p in ps[:1]] == [("justify", ":=:準備書面")]
     assert (ps[1].align, ps[1].text) == (RIGHT, "")                 # 中身のない右揃えの行
-    assert [p.text for p in ps[2:6]] == ["->前文", "+2本文", "+81 3-1234-5678", "+ 項目"]
-    assert [p.left_indent for p in ps[2:8]] == [None, None, None, None, 2, 2]
-    assert ps[6].text == "全角" and ps[7].text == "1. 番号にしない" and ps[7].kind == BODY
+    assert [p.text for p in ps[2:7]] == ["->前文", "->2本文", "+81 3-1234-5678", "+ 項目", "＋２ 全角"]
+    assert [p.left_indent for p in ps[2:8]] == [None, None, None, None, None, 2]
+    assert ps[7].text == "1. 番号にしない" and ps[7].kind == BODY
     assert [p.kind for p in ps[8:]] == [BODY, BODY, TOC, TOC, BODY]
     assert [p.level for p in ps[10:12]] == [3, 2]
 
@@ -90,20 +90,28 @@ def test_empty_aligned_line_takes_a_row_and_stops_conversion():
         (0, "第１　認否"), (1, "認める。"), (3, "別紙"), (4, "# 見出しにしない")]
 
 
-def test_first_line_indent_mark():
-    """-> ：最初の見出しより前の段落の1行目だけを1字下げる（全角スペースを使わない。2026-10-23 班長指示）。"""
+def test_full_width_space_indents_first_line():
+    """字下げは行頭の全角空白で書く（2026-10-28 班長決定。それまでの -> はなくした）。最初の見出しより前、右揃えの
+    段落の後、->N の段落では1行目だけを1字下げ、見出しの後の本文では取り除いてインデントを付け直す。"""
     ts = Typesetter(SAIBAN)
     long = "前文" * 40
-    ps = parse(["-> " + long, "# 見出し", "本文", "-> 別紙", "# 見出しにしない", "<<<=", "# 新しい見出し"],
+    ps = parse(["　" + long, "# 見出し", "　本文", "--: 以上", "　別紙", "->2 　別紙の段落", "<<<=", "　後の前文"],
                SAIBAN)
     assert (ps[0].text, ps[0].first_indent) == (long, 1)
     lines = ts.layout(ps)
     first, second = lines[0], lines[1]
     assert first.glyphs[0].x == ts.pitch and second.glyphs[0].x == 0
-    # 見出しの後の -> は、右揃えの段落と同じく、その段落から先の変換を止める（その段落は1字下げ）
-    assert ps[2].body_level == 1
-    assert (ps[3].kind, ps[3].text, ps[3].body_level, ps[3].first_indent) == (BODY, "別紙", 0, 1)
-    assert (ps[4].kind, ps[4].text) == (BODY, "# 見出しにしない")
-    assert ps[6].kind == "heading"          # セクション区切りの後は、変換を再開する
+    assert (ps[2].text, ps[2].body_level) == ("本文", 1)
+    assert (ps[4].kind, ps[4].text, ps[4].body_level, ps[4].first_indent) == (BODY, "別紙", 0, 1)
+    assert (ps[5].text, ps[5].left_indent, ps[5].first_indent) == ("別紙の段落", 2, 1)
+    assert (ps[7].text, ps[7].body_level, ps[7].first_indent) == ("後の前文", 0, 1)
     row = [ln for ln in ts.layout(ps) if "".join(g.ch for g in ln.glyphs) == "別紙"][0]
     assert row.glyphs[0].x == ts.pitch
+
+
+def test_old_first_line_mark_is_text():
+    """前の版の -> は読み替えず、字として残す。見出しの後に書いても、変換は止めない（2026-10-28 班長指示）。"""
+    ps = parse(["-> 前文", "# 見出し", "-> 本文", "# 二"], SAIBAN)
+    assert (ps[0].text, ps[0].first_indent) == ("-> 前文", 0)
+    assert (ps[2].kind, ps[2].text, ps[2].body_level) == (BODY, "-> 本文", 1)
+    assert (ps[3].kind, ps[3].number) == (HEADING, "第２　")

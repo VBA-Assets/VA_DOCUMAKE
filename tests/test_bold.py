@@ -95,10 +95,10 @@ def test_number_is_bold_when_whole_text_is_bold():
     assert not any(number_bold(2))
 
 def test_bold_around_every_mark():
-    """配置の記号・-> ・その行だけの記号・セルの配置の記号も、太字の記号で囲んだままで記号として読む
-    （「**:=: 準備書面（１）**」など。2026-10-24 班長指示）。"""
+    """配置の記号・字下げの空白・その行だけの記号・セルの配置の記号も、太字の記号で囲んだままで記号として読む
+    （「**:=: 準備書面（１）**」など。2026-10-24 班長指示。字下げは 2026-10-28 に全角空白にした）。"""
     from va_document.document import CENTER, PAGE_BREAK, RIGHT, TITLE
-    paras = parse(["**:=: 準備書面（１）**", "**:-: 中央の行**", "**-> 字下げの段落**", "**<<<**",
+    paras = parse(["**:=: 準備書面（１）**", "**:-: 中央の行**", "**　字下げの段落**", "**<<<**",
                    "**[TOC:2]**", "# 見出し", "| 項目 | 金額 |", "|---|---|", "| 休業損害 | **--: 1,000** |",
                    "**--: 以上**", "**# 右揃えの後は見出しにしない**"], DT)
     title, center, indent, brk, toc, _, table, right, after = paras

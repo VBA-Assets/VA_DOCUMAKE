@@ -828,20 +828,21 @@ def test_markdown_marks_are_blue(window):
     assert marked == ["# ", "- ", "1. ", "|", "|", "|", "|---|---|", "|", "|", "|", "--: "]
 
 
-def test_first_line_indent_button(window):
-    """［字下げ］：行頭に -> を付け、もう一度押すと外す。ほかの配置の記号とは付け替える。青い字で示す。"""
-    window._load_text("前文\n# 見出し")
+def test_no_first_line_indent_button(window):
+    """［字下げ］はなくした（2026-10-28 班長決定。字下げは行頭の全角空白で書く）。配置のボタンは、行頭の全角空白を
+    記号の後ろに残し、もう一度押すと記号だけを外す。全角空白は記号の青い字にしない。"""
+    from tkinter import ttk
+    assert "字下げ" not in {str(b.cget("text")) for b in _widgets(window, ttk.Button, skip_toplevel=True)}
+    window._load_text("　前文\n# 見出し")
     window.text.mark_set("insert", "1.0")
-    window.on_align("-> ")
-    assert _lines(window, 1, 1) == ["-> 前文"]
-    window.on_align(":-: ")
-    assert _lines(window, 1, 1) == [":-: 前文"]
-    window.on_align("-> ")
+    window.on_align("--: ")
+    assert _lines(window, 1, 1) == ["--: 　前文"]
     window._highlight()
     ranges = window.text.tag_ranges("mark")
-    assert "-> " in [window.text.get(a, b) for a, b in zip(ranges[0::2], ranges[1::2])]
-    window.on_align("-> ")
-    assert _lines(window, 1, 1) == ["前文"]
+    marked = [window.text.get(a, b) for a, b in zip(ranges[0::2], ranges[1::2])]
+    assert "--: " in marked and not any("　" in m for m in marked)
+    window.on_align("--: ")
+    assert _lines(window, 1, 1) == ["　前文"]
 
 
 def test_buttons_have_icons(window):
@@ -854,7 +855,7 @@ def test_buttons_have_icons(window):
         # メインの画面のボタンだけ（検索と置換などの別の画面〔Toplevel〕は見ない）
         return _widgets(w, ttk.Button, skip_toplevel=True)
     found = {str(b.cget("text")).replace("\n", ""): b for b in buttons(window)}
-    for text in ("開く", "保存", "印刷", "閉じる", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "字下げ", "インデント", "太字", "均等割付",
+    for text in ("開く", "保存", "印刷", "閉じる", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "インデント", "太字", "均等割付",
                  "見出し", "箇条書き", "段落番号", "改ページ", "セクション区切り", "ヘッダー", "検索", "置換", "蛍光ペン", "幅に合わせる"):
         assert found[text].cget("image"), text
         # リボンの大きいボタン（［選択範囲を仮名化］）はアイコンの下に字、ほかはアイコンの右に字
@@ -1184,26 +1185,26 @@ def test_dots_button_with_bold(window):
 
 
 def test_indent_button_and_shortcuts(window):
-    """［インデント］（Ctrl+I）で +1 を付け、もう一度で外す（字数は手で直す）。字下げと一緒に使え、
+    """［インデント］（Ctrl+I）で ->1 を付け、もう一度で外す（字数は手で直す）。字下げの全角空白と一緒に使え、
     見出しの行には付けない。Ctrl+I でタブは入らない（2026-10-24 班長指示）。"""
     window._load_text("# 認否\n主張は争う。\n次の段落。\n")
     window.text.tag_add("sel", "2.0", "3.end")
     window.on_indent()
-    assert window.raw_text().split("\n")[1:3] == ["+1 主張は争う。", "+1 次の段落。"]
+    assert window.raw_text().split("\n")[1:3] == ["->1 主張は争う。", "->1 次の段落。"]
     window.on_indent()                                   # もう一度で外す（選択は残る）
     assert window.raw_text().split("\n")[1:3] == ["主張は争う。", "次の段落。"]
     window.text.tag_remove("sel", "1.0", "end")
-    window._load_text("# 認否\n+3 主張は争う。\n次の段落。\n")
+    window._load_text("# 認否\n->3 主張は争う。\n次の段落。\n")
     window.text.tag_add("sel", "2.0", "3.end")           # 一部の行に記号があれば、ない行に付ける（字数は変えない）
     window.on_indent()
-    assert window.raw_text().split("\n")[1:3] == ["+3 主張は争う。", "+1 次の段落。"]
+    assert window.raw_text().split("\n")[1:3] == ["->3 主張は争う。", "->1 次の段落。"]
     window.text.tag_remove("sel", "1.0", "end")
-    window.text.mark_set("insert", "2.5")
-    window.on_align("-> ")                            # 字下げと一緒に使える（インデントは残る）
-    assert window.text.get("2.0", "2.end") == "+3 -> 主張は争う。"
-    window.on_align(":-: ")                            # 配置と字下げは付け替え、インデントは残す
-    assert window.text.get("2.0", "2.end") == ":-: +3 主張は争う。"
+    window.text.insert("2.4", "　")                     # 記号の後ろに全角空白（1行目をさらに1字下げる）
+    window.text.mark_set("insert", "2.6")
+    window.on_align(":-: ")                            # 配置を付けても、インデントと字下げの空白は残す
+    assert window.text.get("2.0", "2.end") == ":-: ->3 　主張は争う。"
     window.on_align(":-: ")
+    assert window.text.get("2.0", "2.end") == "->3 　主張は争う。"
     window.text.mark_set("insert", "1.1")
     window.on_indent()                                   # 見出しの行には付けない
     assert window.text.get("1.0", "1.end") == "# 認否"
@@ -1212,9 +1213,9 @@ def test_indent_button_and_shortcuts(window):
     window.text.event_generate("<Control-Key-i>")
     assert window.text.get("3.0", "3.end") == "次の段落。"         # Ctrl+I で外れる。タブは入らない
     window.text.event_generate("<Control-Key-i>")
-    assert window.text.get("3.0", "3.end") == "+1 次の段落。"
+    assert window.text.get("3.0", "3.end") == "->1 次の段落。"
     window._highlight()
-    assert all("mark" in window.text.tag_names(f"3.{c}") for c in range(3))
+    assert all("mark" in window.text.tag_names(f"3.{c}") for c in range(4))
     window.on_plain()                                    # 標準（Ctrl+Shift+N）で記号を外す
     assert window.text.get("3.0", "3.end") == "次の段落。"
 

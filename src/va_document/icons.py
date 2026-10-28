@@ -23,7 +23,7 @@ SVG_FILL = "#212121"
 BUTTON_ICONS = {
     "開く": "folder_open", "保存": "save", "印刷": "print", "閉じる": "document_dismiss", "オプション": "settings",
     "選択範囲を仮名化": "person_lock", "コピー": "copy", "貼り付け": "clipboard_paste",
-    "表題": "document_title", "中央": "text_align_center", "右": "text_align_right", "字下げ": "text_first_line", "インデント": "text_indent_increase", "太字": "text_bold", "均等割付": "text_align_distributed", "傍点": "text_emphasis",
+    "表題": "document_title", "中央": "text_align_center", "右": "text_align_right", "インデント": "text_indent_increase", "太字": "text_bold", "均等割付": "text_align_distributed", "傍点": "text_emphasis",
     "見出し": "text_header_2", "箇条書き": "text_bullet_list_ltr", "段落番号": "text_number_list_ltr",
     "改ページ": "document_page_break", "セクション区切り": "document_split_hint", "目次": "text_bullet_list_square",
     "ヘッダー": "document_header",

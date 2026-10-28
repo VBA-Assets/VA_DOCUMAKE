@@ -17,8 +17,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .doctypes import DEFAULT_DOC_TYPE, DOC_TYPES, NAIYOU, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_LABELS, can_one_width
-from .document import (INDENT_MARK, cell_align_mark, is_line_mark, move_wraps_after_marks, parse_separator, split_cells,
-                       split_lead_marks)
+from .document import (BODY, JUSTIFY, cell_align_mark, is_line_mark, move_wraps_after_marks, parse, parse_separator,
+                       split_cells, split_lead_marks)
 from .pseudonym import tokens_in
 
 EXTENSION = ".vamd"
@@ -37,7 +37,7 @@ PROMPT = """このファイルは、ツール「VA Document」の構文ファイ
 1　状況
 私は、法律事務所などで使う文書を、ツール「VA Document」で作っている。VA Documentは、区切りの行より下のマークダウンを読み込み、見出しの番号・インデント・配置を自動で付けて、裁判所提出書類などの書式の PDF に組む。
 依頼者などの実名を AI に渡さないため、人名・法人名・地名・番号などは、〔人名Ａ〕〔法人Ｘ〕〔人名ＹＴ〕〔地名１〕〔その他甲〕のような記号（〔 〕の中は、種別〔人名・法人・地名・番号・その他〕の後に、英字・数字・漢字などの字）に置き換えてある。同じ記号は、文書のどこでも同じ語を表す。記号の中の字は私が決めたもので、元の語とは関係がない。VA Documentは、あなたの回答を取り込むときに、記号を文字どおりに探して元の語に戻す。記号が少しでも変わると（括弧が［］や()に変わる、中の字が変わる、「同人」「同社」に言い換えられる）、その部分は元に戻らない。
-行の先頭の「:=: 」は表題、「:-: 」は中央揃え、「--: 」は右揃え、「:-- 」は左揃えの記号（マークダウンの表の区切りの行と同じく、コロンのある側に寄せる。記号の後に半角空白を1つ置く）、「-> 」は段落の1行目を1字下げる記号（見出しの後に使うと、そこから先は見出しの番号・インデントを付けない）、「+2 」は段落の左インデントを全角2字にする記号（数字が字数）、「[HEADER] 」はその行をヘッダー（文書の最初のページと、セクション区切りの直後のページの上の余白。「別紙」などを書く）に、「[FOOTER] 」はフッター（各ページの下の余白）に出す記号（配置の記号と一緒に使うことがある）である。表のセルの先頭の「:-: 」「--: 」「:-- 」も、そのセルの配置の記号である。その行だけを書いた <<< は改ページ、<<<= はセクション区切り（改ページして見出しの番号を振り直す）、[TOC] は目次を組む位置の記号である（[TOC:2] のように、載せる見出しのレベルを書き添えることがある）。**語** は太字（ゴシック体）の記号、*語* は傍点（字の上の点）の記号、[語]{5} は語を5字の幅に均等に割り付ける記号、==語== は私が画面で付けた目印（蛍光ペン。PDF には出ない）である。空の行は、そのまま1行の空きになる。VA Documentは、この記号で表題・中央揃え・右揃え・改ページなどを決める。記号が消えると、配置が失われる。
+行の先頭の「:=: 」は表題、「:-: 」は中央揃え、「--: 」は右揃え、「:-- 」は左揃えの記号（マークダウンの表の区切りの行と同じく、コロンのある側に寄せる。記号の後に半角空白を1つ置く）、「->2 」は段落の左インデントを全角2字にする記号（数字が字数。半角で書く）、「[HEADER] 」はその行をヘッダー（文書の最初のページと、セクション区切りの直後のページの上の余白。「別紙」などを書く）に、「[FOOTER] 」はフッター（各ページの下の余白）に出す記号（配置の記号と一緒に使うことがある）である。表のセルの先頭の「:-: 」「--: 」「:-- 」も、そのセルの配置の記号である。その行だけを書いた <<< は改ページ、<<<= はセクション区切り（改ページして見出しの番号を振り直す）、[TOC] は目次を組む位置の記号である（[TOC:2] のように、載せる見出しのレベルを書き添えることがある）。段落の頭（行頭の記号の後ろでもよい）の全角空白は、段落の1行目を1字下げる字下げである。**語** は太字（ゴシック体）の記号、*語* は傍点（字の上の点）の記号、[語]{5} は語を5字の幅に均等に割り付ける記号、==語== は私が画面で付けた目印（蛍光ペン。PDF には出ない）である。空の行は、そのまま1行の空きになる。VA Documentは、この記号で表題・中央揃え・右揃え・改ページなどを決める。記号が消えると、配置が失われる。
 区切りの行には、文書ID・版と、文書の種類などの設定が書いてある。VA Documentは、回答の最初の行にある区切りの行で、どの文書のどの版をもとにした回答かを確かめる。区切りの行がないと、回答を取り込めない。
 
 2　任務
@@ -46,7 +46,8 @@ VA Documentに取り込ませるだけで、実名に戻った文書が正しい
 3　実行
 必ず達成すること：
 ・記号（〔人名Ａ〕など）は、括弧と中の字を含めて一字も変えずに書く。言い換えない。新しい記号を作らない。記号の中身を推測しない。
-・配置の記号（:=: :-: --: :-- -> +2 など）と、ヘッダー・フッターの記号（[HEADER] [FOOTER]）、改ページの記号（<<< <<<=）、目次の記号（[TOC] [TOC:2] など）は、元の行にそのまま残す（記号の後の半角空白も残す）。新しく付けるのは、私が求めたときだけとする。
+・配置の記号（:=: :-: --: :-- ->2 など）と、ヘッダー・フッターの記号（[HEADER] [FOOTER]）、改ページの記号（<<< <<<=）、目次の記号（[TOC] [TOC:2] など）は、元の行にそのまま残す（記号の後の半角空白も残す）。新しく付けるのは、私が求めたときだけとする。
+・段落の頭の全角空白（字下げ）は、元の行にそのまま残す。新しく段落を書くときは、前後の段落に合わせて、頭に全角空白を置くかどうかを決める。
 ・空行を入れない。元の文書にある空の行は、そのまま残す（空の行は、PDF で1行の空きになる）。ただし、元の文書で、同じ階層（# の数が同じ）の見出しの前に空の行を置いているときは、新しく書くその階層の見出しの前にも、空の行を1行置く（文書の先頭、<<< <<<= の直後、直前が空の行・見出しのときを除く）。
 ・見出しは # の数で階層を表す（# が第１、## が１、### が(1)…）。見出しに番号を書かない。# だけの行のすぐ後に見出しを書くと、2つの見出しを1行にまとめる（「第１　１　当事者」。複合見出し）。表題・日付・宛先など、最初の見出しより前の行には # を付けない。
 ・表は、| で列を区切るマークダウンの表で書く。2行目の - = : や、セルの先頭の配置の記号は、私が求めたときを除き、変えない。見出しの行の下を2重線にするときは、2行目のすべての列の - を = にする（|===|===|）。
@@ -281,12 +282,23 @@ def _marks(lines):
             continue
         lead = split_lead_marks(move_wraps_after_marks(ln))
         if lead.left:
-            out.append(("+N", ln))     # 字数は比べない（直してよい）
+            out.append(("->N", ln))     # 字数は比べない（直してよい）
         # ヘッダー・フッターの記号は、大文字・小文字を比べない
-        for m in (lead.align, INDENT_MARK if lead.first else "", lead.area.upper()):
+        for m in (lead.align, lead.area.upper()):
             if m:
                 out.append((m.strip(), ln))
-    return out
+    return out + _indents(lines)
+
+
+def _indents(lines):
+    """字下げの空白が効く段落（見出し・本文として整えない段落〔最初の見出しより前・右揃えの段落の後〕、->N の段落、
+    ヘッダー・フッター。左揃えのもの）のうち、行頭（記号の後ろ）に空白のある行を、記号と同じく [("字下げの空白", 行)] で
+    返す（AI が消したら知らせる。2026-10-28 班長決定）。見出しの後の本文の行頭の空白は、読み込むと取り除くので数えない。
+    どの段落で効くかは、組むときと同じく parse で決める（文書の種類で変わらない）。"""
+    lines = list(lines)
+    return [("字下げの空白", lines[p.src_line]) for p in parse(lines, DOC_TYPES[DEFAULT_DOC_TYPE])
+            if p.kind == BODY and p.first_indent and p.align == JUSTIFY
+            and (not p.body_level or p.left_indent is not None or p.area)]
 
 
 def review(content, doc_id, version, current_body, dictionary):
@@ -303,8 +315,18 @@ def review(content, doc_id, version, current_body, dictionary):
     r.unknown_tokens = [t for t in dict.fromkeys(new_tokens) if dictionary.find(t) is None]
     r.lost_tokens = [t for t in dict.fromkeys(old_tokens) if t not in new_tokens]
     new_marks = Counter(m for m, _ in _marks(content.body))
-    seen = Counter()
+    new_lines = Counter(_marks(content.body))
+    # 回答に同じ行がそのまま残っていれば、その行の記号は残ったとみなしてから、記号の数を比べる（どの行の記号が
+    # 消えたかを、なるべく正しく示すため。2026-10-28）
+    rest = []
     for m, ln in _marks(current_body):
+        if new_lines[(m, ln)]:
+            new_lines[(m, ln)] -= 1
+            new_marks[m] -= 1
+        else:
+            rest.append((m, ln))
+    seen = Counter()
+    for m, ln in rest:
         seen[m] += 1
         if seen[m] > new_marks[m]:
             r.lost_marks.append((m, ln))

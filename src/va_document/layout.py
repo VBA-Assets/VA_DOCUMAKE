@@ -209,7 +209,7 @@ class Typesetter:
             ind = dt.title_indent * self.pitch
             return ind, 0.0, ind
         if p.left_indent is not None:
-            # +N：指定した字数の左インデント（自動調節の対象外。1行目は -> ・行頭の空白の分だけ下げる）
+            # ->N：指定した字数の左インデント（自動調節の対象外。1行目は行頭の空白の分だけ下げる）
             left = min(p.left_indent, self.dt.chars_lines[0] - 1) * self.pitch
             return left, p.first_indent * self.pitch, 0.0
         if p.kind == HEADING:

@@ -18,7 +18,7 @@ from tkinter import ttk
 from . import APP_NAME, __version__, config, ime, printing, theme, tooltip, vamd
 from .ai_ops import AiMixin
 from .doctypes import DOC_TYPES, PAGE_NUMBER_LABELS
-from .document import (BULLET_MARK, CENTER_MARK, HEADER_MARK, HEADING_BUTTON_MARK, INDENT_MARK, NUMBER_MARK,
+from .document import (BULLET_MARK, CENTER_MARK, HEADER_MARK, HEADING_BUTTON_MARK, NUMBER_MARK,
                        PAGE_BREAK_MARK, RIGHT_MARK, SECTION_BREAK_MARK, TITLE_MARK, TOC_MARK)
 from .dialogs import OptionsDialog
 from .editor_ops import EditorMixin
@@ -339,9 +339,10 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         g.small("太字", self.on_bold)
         g.small("傍点", self.on_dots)
         g.small("均等割付", self.on_distribute)
-        for label, mark in (("表題", TITLE_MARK), ("中央", CENTER_MARK), ("右", RIGHT_MARK), ("字下げ", INDENT_MARK)):
+        for label, mark in (("表題", TITLE_MARK), ("中央", CENTER_MARK), ("右", RIGHT_MARK)):
             g.small(label, lambda m=mark: self.on_align(m))
-        # ［インデント］は［字下げ］の下に置く（2026-10-24 班長指示）
+        # ［インデント］は配置のボタンの右の列の一番上に置く（2026-10-24 班長指示で［字下げ］の下に置いていたが、
+        # 2026-10-28 班長決定で［字下げ］をなくした。字下げは行頭の全角空白で書く）
         g.small("インデント", self.on_indent)
         # ［ヘッダー］は、選んだ行の行頭に [HEADER] を付け外しする。配置のボタンと同じく行頭の記号を付け外しするので、
         # ［インデント］の下に置く。フッターはほぼ使わないのでボタンを置かず、[FOOTER] は手で書く（2026-10-25 班長指示）
