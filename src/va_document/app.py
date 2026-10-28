@@ -13,7 +13,7 @@ import time
 import sys
 import tkinter as tk
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from . import APP_NAME, __version__, config, ime, printing, theme, tooltip, vamd
 from .ai_ops import AiMixin
@@ -31,6 +31,10 @@ from .session import Session
 VERSION_LABEL = "Ver" + __version__.replace(".", "")
 REFRESH_DELAY_MS = 600
 SASH_RESTORE_SECONDS = 1.5   # 起動から、確認表示の幅を置き直す間（秒）
+# 既定の AI への指示が新しくなったときの知らせ（書き換えられた指示を使っている人に、起動のときに一度だけ。2026-10-28 班長決定）
+PROMPT_UPDATED_NOTICE = ("この版で、AI への指示の既定の文が新しくなりました。いまは、ユーザーによって書き換えられた指示を"
+                         "使っているため、新しい既定の文は使われていません。オプションの［確認・修正］で、新しい既定の文と"
+                         "見比べてください。［既定に戻す］を押すと、新しい既定の文に替わります。")
 
 
 def _on_screen(geometry):
@@ -147,6 +151,17 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.file_drop = self._init_file_drop([self.panes, self.canvas, self.text])
         if open_path:
             self.after(100, lambda: self.open_path(Path(open_path)))
+        self.after(300, self.notify_prompt_update)
+
+    def notify_prompt_update(self):
+        """ユーザーによって書き換えられた AI への指示を使っていて、書き換えた後に既定の指示が新しくなったときに、
+        一度だけ知らせる（2026-10-28 班長決定）。知らせたら True。"""
+        if not self.session.prompt or self.cfg.ai_prompt_base == vamd.PROMPT_SHA256:
+            return False
+        self.cfg.ai_prompt_base = vamd.PROMPT_SHA256
+        config.save(self.cfg)
+        messagebox.showinfo(APP_NAME, PROMPT_UPDATED_NOTICE, parent=self)
+        return True
 
     # ======================================================================
     # ショートカットキー（2026-10-23 班長指示：Word と同じキー）
@@ -569,10 +584,12 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.cfg.editor_font_size = r["font_size"]
         self.cfg.editor_line_spacing_pt = r["line_spacing"]
         if r["prompt"] is not None:
-            # AI への指示：今の文書と、これから作る文書に使う。保存してある構文ファイルの指示も書き直す
+            # AI への指示：すべての文書に共通（2026-10-28 班長決定）。今の文書の保存してある構文ファイルの指示も書き直す。
+            # ほかの文書は、開いて保存するときに書き直す
             custom = None if vamd.is_default_prompt(r["prompt"]) else r["prompt"]
             self.session.prompt = custom
             self.cfg.ai_prompt = custom or ""
+            self.cfg.ai_prompt_base = vamd.PROMPT_SHA256 if custom else ""
             self.session.rewrite_prompt()
         config.save(self.cfg)
         self._apply_editor_prefs()

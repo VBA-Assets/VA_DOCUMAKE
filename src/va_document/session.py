@@ -50,7 +50,10 @@ class Session:
         self.settings = vamd.Settings(self.cfg.doc_type, self.cfg.page_number, self.cfg.line_numbers,
                                       self.cfg.one_width).normalized()
         self.dictionary = Dictionary()
-        self.prompt = self.cfg.ai_prompt or None    # 利用者が直した AI への指示（None なら既定の指示。オプションで直す）
+        # AI への指示：すべての文書に共通（ユーザーによってオプションで書き換えられた指示。None なら既定の指示。
+        # 2026-10-28 班長決定。開いた構文ファイルの指示は使わない）
+        prompt = self.cfg.ai_prompt
+        self.prompt = None if not prompt or vamd.is_default_prompt(prompt) else prompt
         self.pdf_path = None
         self.vamd_file = None          # 開いた構文ファイル（None なら決まったフォルダの <文書ID>.vamd）
         self.saved_text = None
@@ -285,7 +288,6 @@ class Session:
         self.version = max(content.version, pdf_version)
         if content.settings is not None:
             self.settings = content.settings
-        self.prompt = None if content.prompt is None or vamd.is_default_prompt(content.prompt) else content.prompt
         self.dictionary = d
         self.pdf_path = Path(pdf_path) if pdf_path else None
         self.vamd_file = Path(path)

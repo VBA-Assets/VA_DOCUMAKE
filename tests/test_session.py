@@ -79,9 +79,11 @@ def test_vamd_edited_in_text_editor(session, tmp_path):
     text = s2.resolve({"〔人名Ｂ〕": "丙川次郎"})
     assert "争う。丙川次郎の陳述書は信用できない。" in text and "甲野太郎" in text
     assert s2.is_modified(text)
-    # 次に保存しても、書き足した指示は残る
+    # 次に保存すると、手で書き足した指示は残らず、設定の指示（ここでは既定の指示）を書く（AI への指示はすべての
+    # 文書に共通。2026-10-28 班長決定。それまでは書き足した指示を残した）
     s2.save(text)
-    assert "・敬語は使わない。" in s2.vamd_path.read_text(encoding="utf-8")
+    assert "・敬語は使わない。" not in s2.vamd_path.read_text(encoding="utf-8")
+    assert s2.vamd_path.read_text(encoding="utf-8").startswith(vamd.PROMPT.rstrip())
     assert "丙川" not in s2.vamd_path.read_text(encoding="utf-8")
 
 

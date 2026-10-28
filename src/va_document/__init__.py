@@ -3,5 +3,5 @@
 仕様は、作業フォルダの `仕様.md`。
 """
 
-__version__ = "2.3.0"
+__version__ = "2.3.1"
 APP_NAME = "VA Document"

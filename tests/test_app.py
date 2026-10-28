@@ -1503,6 +1503,7 @@ def test_ai_prompt_in_options(window, tmp_path, monkeypatch):
     monkeypatch.setattr(app, "OptionsDialog", answer(custom))
     window.on_options()
     assert window.session.prompt == custom and window.cfg.ai_prompt == custom
+    assert window.cfg.ai_prompt_base == vamd.PROMPT_SHA256           # 書き換えた時の既定の指示を控える
     saved = window.session.vamd_path.read_text(encoding="utf-8")
     assert "・短く書け。" in saved and "版 1" in saved                    # 版は変えずに指示だけ書き直す
     assert not window.session.vamd_changed_outside()
@@ -1511,7 +1512,23 @@ def test_ai_prompt_in_options(window, tmp_path, monkeypatch):
     assert window.session.prompt == custom                                 # 新しい文書にも使う
     monkeypatch.setattr(app, "OptionsDialog", answer(vamd.PROMPT))          # 既定に戻す
     window.on_options()
-    assert window.session.prompt is None and window.cfg.ai_prompt == ""
+    assert window.session.prompt is None and window.cfg.ai_prompt == "" and window.cfg.ai_prompt_base == ""
+
+
+def test_notice_when_default_prompt_changed(window, monkeypatch):
+    """ユーザーによって書き換えられた指示を使っていて、書き換えた後に既定の指示が新しくなったときだけ、起動のときに
+    一度だけ知らせる（2026-10-28 班長決定）。"""
+    shown = []
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: shown.append(a[1]))
+    assert not window.notify_prompt_update()                    # 既定の指示を使っている
+    window.cfg.ai_prompt = vamd.PROMPT.rstrip() + "\n・短く書け。\n"
+    window.cfg.ai_prompt_base = vamd.PROMPT_SHA256
+    window.session = app.Session(window.cfg)
+    assert not window.notify_prompt_update()                    # 書き換えた時から既定の指示は変わっていない
+    window.cfg.ai_prompt_base = "0" * 64                         # 書き換えた後に既定の指示が新しくなった
+    assert window.notify_prompt_update() and len(shown) == 1
+    assert "ユーザーによって書き換えられた指示" in shown[0] and window.cfg.ai_prompt_base == vamd.PROMPT_SHA256
+    assert not window.notify_prompt_update() and len(shown) == 1    # 一度だけ
 
 
 def test_prompt_dialog_reset(window):

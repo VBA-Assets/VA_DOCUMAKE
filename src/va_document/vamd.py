@@ -67,15 +67,23 @@ VA Documentに取り込ませるだけで、実名に戻った文書が正しい
 """
 
 
-# 前の版の既定の AI への指示（rstrip した文字列の SHA-256）。これと同じ指示の構文ファイルを開いたときは、利用者が
-# 直した指示ではなく既定の指示として扱い、今の版の指示に替える（記号を足したときに、新しい記号の説明が届くように）。
+# 前の版の既定の AI への指示（rstrip した文字列の SHA-256）。設定の指示（オプション）がこれと同じなら、ユーザーによって
+# 書き換えられた指示ではなく既定の指示として扱い、今の版の指示を使う（記号を足したときに、新しい記号の説明が届くように）。
 # Ver200 で名前を VA Document に改め、Ver160 までの構文ファイル（.vadm）を読まなくした（2026-10-27 班長決定）ので、
 # それまでの版の指示（Ver130・Ver140・Ver142）は外した。指示を改めたら、ここに前の版の指示を足す
-PREVIOUS_PROMPTS = set()
+# （Ver220・Ver230 で足し忘れた。2026-10-28 に Ver231 で足した。Ver231 からは、開いた構文ファイルの指示は使わず、
+# すべての文書に設定の指示〔なければ既定の指示〕を書く〔班長決定〕）
+PREVIOUS_PROMPTS = {
+    "c293b7da0341d8c303a0fa4f11a7d36d48c387dfca6c1acaceaf3a4ee6dcd2ba",   # Ver200・Ver210・Ver211
+    "ebf82c3a20776b967575fa8d1d127be53ce3ad7f2ced6ad5e7f6b61210edb287",   # Ver220
+}
+# 今の版の既定の指示の SHA-256。PROMPT を直すと試験（test_vamd）が落ちるので、そのときは、この値を PREVIOUS_PROMPTS に
+# 移してから、新しい値に替える（前の版の登録を忘れないため。2026-10-28）
+PROMPT_SHA256 = "30b5cdd9d81798eb3cf88831335ad5fedde648522fd4867dbc632689d3895a08"   # Ver230〜
 
 
 def is_default_prompt(prompt):
-    """prompt（構文ファイル・オプションの画面の指示）が、今の版か前の版の既定の指示か。"""
+    """prompt（オプションの画面・設定の指示）が、今の版か前の版の既定の指示か。"""
     text = prompt.rstrip()
     return text == PROMPT.rstrip() or hashlib.sha256(text.encode("utf-8")).hexdigest() in PREVIOUS_PROMPTS
 
@@ -188,8 +196,8 @@ def parse_separator_line(line):
 def build(doc_id, version, settings, body, prompt=None):
     """構文ファイルの中身を作る。body は記号に置き換えた文書（文字列）。
 
-    prompt は AI への指示の部分。利用者が構文ファイルの指示を書き換えていれば、それを渡す
-    （構文ファイルは、AI に渡す前も後も自由に直してよい。2026-10-23 班長指示）。None なら既定の指示。
+    prompt は AI への指示の部分。ユーザーによってオプションで書き換えられた指示があれば、それを渡す（すべての文書に
+    共通。2026-10-28 班長決定。構文ファイルの指示の部分を手で直しても、次に保存するときに書き直す）。None なら既定の指示。
     """
     lines = body.splitlines()
     while lines and not lines[-1].strip():

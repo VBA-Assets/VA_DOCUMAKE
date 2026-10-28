@@ -339,7 +339,7 @@ class OptionsDialog(_Dialog):
     def _show_prompt_state(self):
         current = self.new_prompt if self.new_prompt is not None else self.prompt
         same = current.rstrip() == self.default_prompt.rstrip()
-        self.prompt_note.configure(text="既定の指示を使っています。" if same else "直した指示を使っています。")
+        self.prompt_note.configure(text="既定の指示を使っています。" if same else "ユーザーによって書き換えられた指示を使っています。")
 
     def edit_prompt(self):
         current = self.new_prompt if self.new_prompt is not None else self.prompt

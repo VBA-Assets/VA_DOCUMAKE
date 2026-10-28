@@ -43,7 +43,12 @@ class AppConfig:
     editor_font_family: str = ""
     editor_font_size: int = EDITOR_FONT_SIZE
     editor_line_spacing_pt: int = EDITOR_LINE_SPACING     # Ver151 から。それまでは editor_line_spacing（画素）
-    ai_prompt: str = ""             # 利用者が直した AI への指示（"" は既定。新しい文書に使う。2026-10-24 班長指示）
+    # ユーザーによって書き換えられた AI への指示（"" は既定。2026-10-24 班長指示。2026-10-28 班長決定で、すべての文書に
+    # 共通にした：どの文書を保存しても、この指示〔なければ既定の指示〕を書く）
+    ai_prompt: str = ""
+    # ai_prompt を書き換えた（または、既定の指示が新しくなったことを知らせた）ときの既定の指示の SHA-256。
+    # 起動のときに今の既定の指示と違えば、一度だけ知らせる（2026-10-28 班長決定）
+    ai_prompt_base: str = ""
 
     def remember_settings(self, settings):
         """文書の設定（vamd.Settings）を、次の新しい文書の既定として覚える（2026-10-23 班長指示）。"""
@@ -70,6 +75,8 @@ class AppConfig:
             self.editor_font_family = ""
         if not isinstance(self.ai_prompt, str):
             self.ai_prompt = ""
+        if not isinstance(self.ai_prompt_base, str):
+            self.ai_prompt_base = ""
 
     def remember_pdf_folder(self, folder):
         folder = str(Path(folder).resolve())

@@ -367,3 +367,48 @@ def test_prompt_says_tokens_are_per_document():
     """AI への指示に、記号は文書ごとに振ることと、ほかの文書の記号を書き写さないことを書く（2026-10-25 班長決定）。"""
     assert "記号は文書ごとに振っている" in vamd.PROMPT
     assert "ほかの文書の記号を、この文書にそのまま書き写さない" in vamd.PROMPT
+
+
+def test_prompt_hash_is_recorded():
+    """今の版の既定の指示の SHA-256 を PROMPT_SHA256 に控える。指示を直すとこの試験が落ちるので、前の値を
+    PREVIOUS_PROMPTS に移してから新しい値に替える（前の版の登録を忘れないため。Ver220・Ver230 で忘れた。2026-10-28）。"""
+    import hashlib
+    assert hashlib.sha256(vamd.PROMPT.rstrip().encode("utf-8")).hexdigest() == vamd.PROMPT_SHA256
+    assert vamd.PROMPT_SHA256 not in vamd.PREVIOUS_PROMPTS
+
+
+@pytest.mark.parametrize("version", ["Ver211", "Ver220"])
+def test_old_default_prompt_is_replaced_on_open(version, tmp_path):
+    """前の版が書いた構文ファイル（その版の既定の指示。tests/data/前の版の指示 は、配った各版のソースで作った）を開くと、
+    保存するときは今の版の指示を書く（2026-10-28 Ver231）。前の版の既定の指示は見分けられる（少しでも直したものは別）。"""
+    from va_document import config
+    from va_document.session import Session
+    src = DATA / "前の版の指示" / f"{version}.vamd"
+    old = vamd.read_file(src).prompt
+    assert "「-> 」" in old and vamd.is_default_prompt(old)
+    assert not vamd.is_default_prompt(old.replace("表題", "題", 1))
+    path = tmp_path / src.name
+    path.write_bytes(src.read_bytes())
+    s = Session(config.AppConfig(vamd_folder=str(tmp_path)))
+    s.open_vamd(path, False)
+    assert s.prompt is None
+    assert s.vamd_text("前書き。").startswith(vamd.PROMPT.rstrip())
+
+
+def test_prompt_is_common_to_all_documents(tmp_path):
+    """AI への指示はすべての文書に共通：開いた構文ファイルの指示（手で直したものも）は使わず、設定の指示（ユーザーに
+    よって書き換えられた指示。なければ既定の指示）を書く（2026-10-28 班長決定）。"""
+    from va_document import config
+    from va_document.session import Session
+    path = tmp_path / "K7Q29XMD.vamd"
+    path.write_text(vamd.build("K7Q29XMD", 2, vamd.Settings("Saiban"), "本文。", "手で直した指示"), encoding="utf-8")
+    s = Session(config.AppConfig(vamd_folder=str(tmp_path)))
+    s.open_vamd(path, False)
+    assert s.prompt is None and s.vamd_text("本文。").startswith(vamd.PROMPT.rstrip())
+    custom = vamd.PROMPT.rstrip() + "\n・短く書け。"
+    s = Session(config.AppConfig(vamd_folder=str(tmp_path), ai_prompt=custom))
+    s.open_vamd(path, False)
+    assert s.prompt == custom and s.vamd_text("本文。").startswith(custom)
+    s = Session(config.AppConfig(vamd_folder=str(tmp_path), ai_prompt=vamd.read_file(
+        DATA / "前の版の指示" / "Ver220.vamd").prompt))
+    assert s.prompt is None                                   # 前の版の既定の指示が設定に残っていても、今の既定の指示
