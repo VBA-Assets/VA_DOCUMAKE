@@ -5,6 +5,8 @@
 ・ボタンは、ふだんは枠も地もなく、マウスを重ねたときだけ淡い青の地と枠を出す（Word のリボンと同じ。班長の UI 方針の
   「ボタンには常時、細い枠線」の、このツールだけの例外。2026-10-24 班長決定）。スタイルは theme.py の Ribbon*。
 ・組の名前は、どの組も下端にそろえる（2026-10-24 班長指示）。
+・ボタンを押しても、キーボードの焦点はエディターに残す（Word のリボンと同じ。ttk のボタンは押すと焦点を取るので、
+  ボタンで書式を付けた後の Ctrl+Z〔エディターのキー〕が効かず、打った字もエディターに入らなかった。2026-10-28 班長指摘）。
 ・入力欄の側の幅に組が入りきらないときは、入りきらない組を次の段に送る（Word のように組を畳んで隠すことはしない）。
   もとは、大きいボタンだけの組（AI 連携）を小さいボタンを積んだ形に縮めてもいたが、2026-10-25 に［コピー］［貼り付け］を
   小さいボタンにして縮める組がなくなったので、その仕組みは除いた。
@@ -47,14 +49,14 @@ class RibbonGroup(ttk.Frame):
         tooltip.py）。"""
         self._column += 1
         self._row = ROWS
-        b = ttk.Button(self.body, text=text, command=command, style="RibbonLarge.TButton",
+        b = ttk.Button(self.body, text=text, command=command, style="RibbonLarge.TButton", takefocus=False,
                        **self._images(text, icon, True), **kw)
         b.grid(row=0, column=self._column, rowspan=ROWS, sticky="ns", padx=1)
         return b
 
     def small(self, text, command, icon=None, **kw):
         """小さいボタン（アイコンの右に字）。今の列に縦に積み、ROWS 個で次の列へ。"""
-        widget = ttk.Button(self.body, text=text, command=command, style="Ribbon.TButton",
+        widget = ttk.Button(self.body, text=text, command=command, style="Ribbon.TButton", takefocus=False,
                             **self._images(text, icon, False), **kw)
         if self._row >= ROWS:
             self._column += 1

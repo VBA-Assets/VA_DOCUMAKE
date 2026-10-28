@@ -10,6 +10,8 @@ tk = pytest.importorskip("tkinter")
 from tkinter import messagebox  # noqa: E402
 
 from va_document import ai_ops, app, config, editor_mark, file_ops, theme, vamd  # noqa: E402
+from va_document.document import (BULLET_MARK, CENTER_MARK, HEADING_BUTTON_MARK, PAGE_BREAK_MARK,  # noqa: E402
+                                  RIGHT_MARK)
 from va_document.pdfwriter import read_id  # noqa: E402
 from va_document.editor_mark import EDITOR_MARK_WATCH_MS  # noqa: E402
 
@@ -1035,6 +1037,184 @@ def test_bold_on_heading_line_applies_to_same_level(window):
     window.text.mark_set("insert", "1.1")
     window.on_bold()
     assert window.raw_text().startswith("本文。")
+
+def test_bold_on_heading_sets_upper_levels_and_releases_lower_levels(window):
+    """［太字］も、見出しの前の空行と同じく、見出しの行全体を選んで押せる。下の段の見出しで付けると上の段の見出しも
+    太字にし、上の段の見出しで外すと下の段の見出しの太字も外す（2026-10-28 班長指示）。"""
+    src = "# 第一\n本文。\n## 小一\n本文。\n### 細一\n本文。\n# 第二\n## 小二\n### 細二\n本文。"
+
+    def lines():
+        return window.raw_text().rstrip("\n").split("\n")
+
+    def select(a, b):
+        window.text.tag_remove("sel", "1.0", "end")
+        window.text.tag_add("sel", a, b)
+        window.text.mark_set("insert", b)
+    window._load_text(src)
+    select("3.0", "3.end")                               # 段2の行全体（改行を含まない）で付ける：段1・段2が太字に
+    window.on_bold()
+    assert lines() == ["# **第一**", "本文。", "## **小一**", "本文。", "### 細一", "本文。", "# **第二**", "## **小二**",
+                       "### 細二", "本文。"]
+    # 選んだ行全体を選び直し（続けて押せる）、カーソルは同じ字のところ（行末）に残る
+    assert window._selection() == "## **小一**"
+    assert window.text.compare("insert", "==", "3.end")
+    select("9.0", "10.0")                                # 段3の行全体（行末の改行まで）で付ける：段3も太字に
+    window.on_bold()
+    assert lines()[4] == "### **細一**" and lines()[8] == "### **細二**"
+    select("8.0", "8.end")                               # 段2で外す：段2・段3が外れ、段1は残る
+    window.on_bold()
+    assert lines() == ["# **第一**", "本文。", "## 小一", "本文。", "### 細一", "本文。", "# **第二**", "## 小二",
+                       "### 細二", "本文。"]
+    assert window.text.compare("insert", "==", "8.end")
+    window.text.edit_undo()                             # Ctrl+Z 1回で、外す前に戻る
+    assert lines()[2] == "## **小一**" and lines()[4] == "### **細一**"
+    window.text.tag_remove("sel", "1.0", "end")
+    window.text.mark_set("insert", "7.5")                # 選ばずに段1で外す：すべて外れる
+    window.on_bold()
+    assert window.raw_text().rstrip("\n") == src
+    assert window.text.get("insert", "insert lineend") == "二"   # 「# **第|二**」のカーソルは「第」の後のまま
+
+def test_wrap_buttons_on_whole_and_multiple_lines(window):
+    """［太字］［傍点］［蛍光ペン］［均等割付］は、行の先頭から選んだ行を、行頭の記号の後ろから囲む（見出しの
+    「# **見出し**」と同じ）。行末の改行まで選んでもよい。行をまたいで選ぶと、行ごとに囲み（空の行・表・改ページなどの
+    記号の行は飛ばす）、すべて囲まれていれば外す。囲んだ字は選んだままにする（2026-10-28 班長指示）。"""
+    def lines(k):
+        return window.raw_text().split("\n")[:k]
+
+    def select(a, b):
+        window.text.tag_remove("sel", "1.0", "end")
+        window.text.tag_add("sel", a, b)
+        window.text.mark_set("insert", b)
+    window._load_text("- 項目\n:-: 本文\n")
+    select("1.0", "2.0")                                 # 行末の改行まで
+    window.on_bold()
+    select("2.0", "2.end")
+    window.on_dots()
+    assert lines(2) == ["- **項目**", ":-: *本文*"]
+    assert window._selection() == "本文"
+    window.on_dots()                                     # 続けて押すと外す
+    assert lines(2) == ["- **項目**", ":-: 本文"]
+    # 行全体を囲んだ形（「**:-: 本文**」）は、記号の後ろを囲んだ形として外す
+    window._load_text("**:-: 本文**\n")
+    select("1.0", "1.end")
+    window.on_bold()
+    assert lines(1) == [":-: 本文"]
+    # 行をまたぐ選択：行ごとに囲み、空の行・表・改ページの行は飛ばす。一部の行が囲まれていれば、残りを囲む
+    src = "第一の**文**。\n\n<<<\n| a | b |\n## 見出し\n最後の文。\n"
+    window._load_text(src)
+    select("1.3", "6.3")
+    window.on_highlight()
+    assert lines(6) == ["第一の==**文**。==", "", "<<<", "| a | b |", "## ==見出し==", "==最後の==文。"]
+    assert window._selection().startswith("**文**。") and window._selection().endswith("最後の")
+    window.on_highlight()                                # すべて囲まれていれば、すべて外す
+    assert window.raw_text() == src
+    select("5.0", "6.end")
+    window.on_bold()
+    window.on_bold()
+    assert window.raw_text() == src
+    window.text.edit_undo()                              # Ctrl+Z 1回で、1回分だけ戻る
+    assert lines(6)[4:] == ["## **見出し**", "**最後の文。**"]
+    select("5.0", "6.end")
+    window.on_distribute()                               # 字数は、太字の記号を除いて数える
+    assert lines(6)[4:] == ["## [**見出し**]{3}", "[**最後の文。**]{5}"]
+    window.on_distribute()
+    assert lines(6)[4:] == ["## **見出し**", "**最後の文。**"]
+
+
+def test_align_skips_blank_lines_and_keeps_selection(window):
+    """［表題］［中央］［右］は、字のある行と一緒に選んだ字のない行には付けない（字のない行だけを選んだときは付け、
+    カーソルを行末に置く。［見出し］と同じ）。「**:-: 本文**」の行でも選択を残す（2026-10-28 班長指示）。"""
+    window._load_text("本文一。\n\n本文二。\n\n")
+    window.text.tag_add("sel", "1.0", "3.end")
+    window.on_align(CENTER_MARK)
+    assert window.raw_text().split("\n")[:3] == [":-: 本文一。", "", ":-: 本文二。"]
+    window.text.tag_remove("sel", "1.0", "end")
+    window.text.mark_set("insert", "4.0")
+    window.on_align(RIGHT_MARK)
+    assert window.raw_text().split("\n")[3] == "--: " and window.text.index("insert") == "4.4"
+    window._load_text("**:-: 準備書面**\n")
+    window.text.tag_add("sel", "1.0", "1.end")
+    window.on_align(RIGHT_MARK)
+    assert window.raw_text().split("\n")[0] == "--: **準備書面**"
+    assert "準備書面" in window._selection()             # 選択が残り、続けて押すと外す
+    window.on_align(RIGHT_MARK)
+    assert window.raw_text().split("\n")[0] == "**準備書面**"
+
+
+def test_bold_heading_keeps_selection(window):
+    """見出しの字をすべて選んで［太字］を押すと、見出しの字を選んだままにする（続けて押すと外す。2026-10-28 班長指示）。"""
+    window._load_text("# 請求の原因\n# 結論\n")
+    window.text.tag_add("sel", "1.2", "1.end")
+    window.on_bold()
+    assert window._selection() == "**請求の原因**"
+    window.on_bold()
+    assert window.raw_text().split("\n")[:2] == ["# 請求の原因", "# 結論"]
+    assert window._selection() == "請求の原因"
+
+
+def test_line_mark_in_table_goes_before_table(window):
+    """表の中で［改ページ］などを押すと、表の前に入れる（表を分けない。2026-10-28 班長指示）。"""
+    window._load_text("本文。\n| a | b |\n|---|---|\n| c | d |\n")
+    window.text.mark_set("insert", "4.3")
+    window.on_line_mark(PAGE_BREAK_MARK)
+    assert window.raw_text().split("\n")[:5] == ["本文。", "<<<", "| a | b |", "|---|---|", "| c | d |"]
+
+
+def test_outline_and_paragraph_kind_on_aligned_heading(window):
+    """配置の記号の付いた行（「:-: ## 見出し」「:-: 本文」）も、Alt+Shift+←／→・［見出し］［箇条書き］で見出しとして扱い、
+    配置の記号を残す。Alt+Shift+←／→ は、配置の記号の付いた本文も見出しにし、上げ下げが見出しと本文の間で回る
+    （2026-10-28 班長指示）。"""
+    window._load_text(":-: ## 見出し\n:-: 本文\n")
+    window.text.mark_set("insert", "1.6")
+    window.on_outline(1)
+    assert window.raw_text().split("\n")[0] == ":-: ### 見出し"
+    window.on_outline(-1)
+    assert window.raw_text().split("\n")[0] == ":-: ## 見出し"
+    window.on_paragraph_kind(HEADING_BUTTON_MARK)        # 見出しで押すと外す
+    assert window.raw_text().split("\n")[0] == ":-: 見出し"
+    window._load_text("**:-: ## 見出し**\n:-: 本文\n")
+    window.text.mark_set("insert", "1.6")
+    window.on_paragraph_kind(BULLET_MARK)
+    assert window.raw_text().split("\n")[0] == ":-: - **見出し**"
+    # 「:-: 本文」：→ で見出し（前に見出しがなければ ##）、← で上げて # から本文に戻り、また ← で見出しになる
+    window.text.mark_set("insert", "2.5")
+    seen = []
+    for step in (1, -1, -1, -1):
+        window.on_outline(step)
+        seen.append(window.raw_text().split("\n")[1])
+    assert seen == [":-: ## 本文", ":-: # 本文", ":-: 本文", ":-: ## 本文"]
+    window.on_paragraph_kind(HEADING_BUTTON_MARK)        # ［見出し］は配置の記号の付いた見出しを外すが、本文には付けない
+    window.on_paragraph_kind(HEADING_BUTTON_MARK)        # （2026-10-25 班長指示）
+    assert window.raw_text().split("\n")[1] == ":-: 本文"
+    # ->N・[HEADER] の付いた行は、見出しにならないので変えない
+    window._load_text("->2 本文\n")
+    window.on_outline(1)
+    assert window.raw_text().split("\n")[0] == "->2 本文"
+
+
+def test_ribbon_button_keeps_focus_in_editor(window):
+    """リボンのボタンを押しても、キーボードの焦点はエディターに残り、続けて Ctrl+Z で戻せる（2026-10-28 班長指摘。
+    ttk のボタンは押すと焦点を取るので、ボタンで書式を付けた後の Ctrl+Z がエディターに届かなかった）。"""
+    def buttons(w):
+        for child in w.winfo_children():
+            if isinstance(child, tk.ttk.Button) and str(child.cget("style")).startswith("Ribbon"):
+                yield child
+            yield from buttons(child)
+    found = list(buttons(window))
+    assert found and all(not b.cget("takefocus") for b in found)
+    window._load_text("本文。\n")
+    _focus_editor(window)
+    window.text.mark_set("insert", "1.0")
+    center =next(b for b in found if b.cget("text") == "中央")
+    center.event_generate("<ButtonPress-1>", x=3, y=3)
+    center.event_generate("<ButtonRelease-1>", x=3, y=3)
+    window.update()
+    assert window.raw_text().startswith(":-: 本文。")
+    assert window.focus_get() is window.text
+    window.text.event_generate("<Control-z>")
+    window.update()
+    assert window.raw_text().startswith("本文。")
+
 
 def test_heading_space_by_selecting_heading(window):
     """見出しの行全体（または見出しの字すべて）を選んで Enter を押すと、同じ段の見出しの前に空行を1行ずつ入れ、

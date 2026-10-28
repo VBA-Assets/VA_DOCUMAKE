@@ -3,13 +3,14 @@
 
 メインの画面（app.MainWindow）の部品（mixin）。self.text（tk.Text）・self.session などは MainWindow が持つ。
 """
+import difflib
 import math
 import re
 import tkinter as tk
 
 from . import vamd
 from .document import (ALIGN_MARKS, BLANK, BULLET, BULLET_MARK, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN,
-                       DISTRIBUTE_RE, HEADING, HEADING_BUTTON_MARK, HEADING_MARK_RE,
+                       HEADING, HEADING_BUTTON_MARK, HEADING_MARK_RE,
                        LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, NUMBER_MARK, PAGE_BREAK, RIGHT_MARK, SECTION_BREAK,
                        TABLE, TOC, area_of,
                        cell_separators, has_inline_marks, inline_mark_spans, is_line_mark, is_table_line, lead_mark_len,
@@ -114,9 +115,10 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
         """選んだ文字列を太字にする（**文字** で囲む。Word の Ctrl+B。2026-10-24 班長指示）。
         既に囲まれていれば、記号を外す。行をまたぐ選択と、空白だけの選択には付けない。
 
-        見出しの行で押したとき（選んでいない、または見出しの字をすべて選んだとき）は、同じ段の見出しの行を
-        すべて太字にする。その見出しが既に太字なら、同じ段の見出しの太字をすべて外す（同じ段の見出しの太字を
-        そろえるため。組むときは書いたとおりにする。2026-10-24 班長決定）。
+        見出しの行で押したとき（選んでいない、見出しの行全体を選んだ、または見出しの字をすべて選んだとき）は、
+        同じ段と上の段の見出しの行をすべて太字にする。その見出しが既に太字なら、同じ段と下の段の見出しの太字を
+        すべて外す（同じ段の見出しの太字をそろえるため。組むときは書いたとおりにする。2026-10-24 班長決定。
+        選び方と段の連動は、見出しの前の空行と同じ。2026-10-28 班長指示）。
         """
         target = self._heading_for_bold()
         if target:
@@ -135,12 +137,11 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
 
     def on_distribute(self):
         """選んだ字を均等割付にする（[文字]{N} の形で挟む。N は選んだ字の数〔半角は半字〕を切り上げた字数で、
-        目次と同じくエディターで手で直す。2026-10-24 班長指示）。既に挟まれていれば外す。行をまたぐ選択と、
-        空白だけの選択には付けない。Ctrl+Z 1回で戻せる。"""
-        sel = self._sel_range()
-        if sel:
-            a, b = sel
-        else:
+        目次と同じくエディターで手で直す。2026-10-24 班長指示）。既に挟まれていれば外す。空白だけの選択には
+        付けない。行をまたいで選んだときと、行の先頭から選んだときは、行ごとに挟む（_wrap_selection）。
+        Ctrl+Z 1回で戻せる。"""
+        sel = selected = self._sel_range()
+        if not sel:
             # 表のセルにカーソルがあれば、そのセルの字全体を挟む・外す（配置の記号の後から。2026-10-24 班長指示）
             cells = self._table_cells()
             if not cells:
@@ -149,54 +150,37 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
             _, start, end, _ = self._cell_content(n, s, e)
             if start >= end:
                 return
-            a, b = f"{n}.{start}", f"{n}.{end}"
-            whole = DISTRIBUTE_RE.fullmatch(self.text.get(a, b))
-            if whole:
-                with undoable(self.text):
-                    self.text.delete(a, b)
-                    self.text.insert(a, whole.group(1))
-                return
-        sel = self.text.get(a, b)
-        if not sel.strip(" 　") or "\n" in sel:
-            return
-        before = self.text.get(f"{a} linestart", a).endswith(DISTRIBUTE_OPEN)
-        after = DISTRIBUTE_CLOSE_RE.match(self.text.get(b, f"{b} lineend"))
-        whole = DISTRIBUTE_RE.fullmatch(sel)
-        with undoable(self.text):
-            if before and after:
-                self.text.delete(b, f"{b}+{len(after.group(0))}c")
-                self.text.delete(f"{a}-{len(DISTRIBUTE_OPEN)}c", a)
-                a = self.text.index(f"{a}-{len(DISTRIBUTE_OPEN)}c")
-                b = self.text.index(f"{a}+{len(sel)}c")
-            elif whole:
-                self.text.delete(a, b)
-                self.text.insert(a, whole.group(1))
-                b = self.text.index(f"{a}+{len(whole.group(1))}c")
-            else:
-                closing = f"]{{{math.ceil(sum(0.5 if is_half(c) else 1 for c in sel))}}}"
-                self.text.insert(b, closing)
-                self.text.insert(a, DISTRIBUTE_OPEN)
-                a = self.text.index(f"{a}+{len(DISTRIBUTE_OPEN)}c")
-                b = self.text.index(f"{a}+{len(sel)}c")
-        self.text.tag_remove("sel", "1.0", "end")
-        self.text.tag_add("sel", a, b)
-        self.text.mark_set("insert", b)
+            sel = f"{n}.{start}", f"{n}.{end}"
+
+        def bounds(line, s, e):
+            """選んだ字を挟む「[」の位置と「]{N}」の範囲 (「[」, 「]」, 終わり)。記号は選んだ字の外側にも内側にもあってよい
+            （行をまたいで選ぶと、行の先頭の側は記号が内側に入る）。なければ None。"""
+            o = s - 1 if line[:s].endswith(DISTRIBUTE_OPEN) else s if line.startswith(DISTRIBUTE_OPEN, s) else None
+            m = DISTRIBUTE_CLOSE_RE.match(line, e) or _CLOSE_AT_END_RE.search(line, 0, e)
+            if o is None or not m or m.start() <= o or any(c in line[o + 1:m.start()] for c in "[]"):
+                return None
+            return o, m.start(), m.end()
+
+        def apply(line, s, e, release):
+            found = bounds(line, s, e)
+            if found:
+                if not release:
+                    return line, s, e
+                o, c, end = found
+                return line[:o] + line[o + 1:c] + line[end:], o, c - 1
+            # 字数は、記号（太字など）を除いた字で数える
+            closing = f"]{{{math.ceil(sum(0.5 if is_half(c) else 1 for c in split_inline(line[s:e])[0]))}}}"
+            k = len(DISTRIBUTE_OPEN)
+            return line[:s] + DISTRIBUTE_OPEN + line[s:e] + closing + line[e:], s + k, e + k
+        self._wrap_selection(sel, lambda line, s, e: bounds(line, s, e) is not None, apply, select=bool(selected))
 
     def _toggle_wrap(self, wrap):
-        """選んだ文字列を wrap（** == *）で囲む。既に囲まれていれば外す。行をまたぐ選択と、空白だけの選択には
-        付けない。Ctrl+Z 1回で戻せる。太字と傍点は * の数で見分ける（「***語***」は太字と傍点。* が2つ以上なら太字、
-        奇数なら傍点）。"""
+        """選んだ文字列を wrap（** == *）で囲む。既に囲まれていれば外す。空白だけの選択には付けない。行をまたいで
+        選んだときと、行の先頭から選んだときは、行ごとに囲む（_wrap_selection）。Ctrl+Z 1回で戻せる。太字と傍点は
+        * の数で見分ける（「***語***」は太字と傍点。* が2つ以上なら太字、奇数なら傍点）。"""
         sel = self._sel_range()
         if not sel:
             return
-        a, b = sel
-        sel = self.text.get(a, b)
-        if not sel.strip(" 　") or "\n" in sel:
-            return
-        # 選択の前後の空白は囲まない（「** 文字**」は記号にならない）
-        a = self.text.index(f"{a}+{len(sel) - len(sel.lstrip(' 　'))}c")
-        b = self.text.index(f"{b}-{len(sel) - len(sel.rstrip(' 　'))}c")
-        sel = self.text.get(a, b)
         n = len(wrap)
 
         def run(s, from_end=False):
@@ -206,25 +190,85 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
 
         def wrapped(left, right):
             return left % 2 == 1 and right % 2 == 1 if wrap == "*" else left >= n and right >= n
-        outside = wrapped(run(self.text.get(f"{a} linestart", a), True), run(self.text.get(b, f"{b} lineend")))
+
+        def runs(line, s, e):
+            """選んだ字の左右の境目に続く記号の字の数 (左の外, 左の内, 右の内, 右の外)。記号は選んだ字の外側にも内側にも
+            あってよい（行をまたいで選ぶと、行の先頭の側は記号が内側に入る）。選んだ字が記号だけなら None。"""
+            inner = run(line[s:e])
+            if inner == e - s:
+                return None
+            return run(line[:s], True), inner, run(line[s:e], True), run(line[e:])
+
+        def is_on(line, s, e):
+            r = runs(line, s, e)
+            return r is not None and wrapped(r[0] + r[1], r[2] + r[3])
+
+        def apply(line, s, e, release):
+            if not release:
+                if is_on(line, s, e):
+                    return line, s, e
+                return line[:s] + wrap + line[s:e] + wrap + line[e:], s + n, e + n
+            # 境目に続く記号の字はみな同じ字なので、どこから n 字除いても同じになる（右、左の順に、外側の端から除く）
+            lo, li, ri, _ = runs(line, s, e)
+            line = line[:e - ri] + line[e - ri + n:]
+            line = line[:s - lo] + line[s - lo + n:]
+            return line, s + li - n, e - ri - n
+        self._wrap_selection(sel, is_on, apply)
+
+    def _wrap_selection(self, sel, is_on, apply, select=True):
+        """字を囲む記号（太字・蛍光ペン・傍点・均等割付）の付け外しの共通の流れ。sel（先頭, 末尾）の字を、行ごとに
+        is_on(行, 始め, 終わり) で確かめ、すべて既に囲まれていれば外し、そうでなければ囲む（apply(行, 始め, 終わり, 外すか)
+        が、書き換えた行と、囲んだ字の始め・終わりを返す）。Ctrl+Z 1回で戻せる。select が真なら、囲んだ字を選んだままに
+        する（続けて押せる。選ばずに表のセルで押したときは、選ばない）。
+
+        選択の前後の空白は囲まない（「** 文字**」は記号にならない）。行の先頭から選んだ行は、行頭の記号（ヘッダー・配置・
+        ->N・字下げの空白・見出し・箇条書き・段落番号）の後ろから囲む（見出しの「# **見出し**」と同じ）。行末の改行まで
+        選んだときは、その行まで。行をまたいで選んだとき（行の先頭から選んだときも）は、空の行と、表・改ページなどの
+        記号の行を飛ばす（2026-10-28 班長指示）。"""
+        (la, ca), (lb, cb) = [tuple(int(v) for v in x.split(".")) for x in sel]
+        if lb > la and cb == 0:
+            lb -= 1
+            cb = len(self.text.get(f"{lb}.0", f"{lb}.end"))
+        found = []
+        for k in range(la, lb + 1):
+            line = self.text.get(f"{k}.0", f"{k}.end")
+            s, e = (ca if k == la else 0), (cb if k == lb else len(line))
+            if s == 0 or la != lb:
+                if not line.strip(" 　") or _structural_line(line):
+                    continue
+            if s == 0:
+                if e == len(line):
+                    line = move_wraps_after_marks(line)     # 「**:-: 本文**」は「:-: **本文**」として扱う（字の数は同じ）
+                s = _lead_len(line)
+            while s < e and line[s] in " 　":
+                s += 1
+            while e > s and line[e - 1] in " 　":
+                e -= 1
+            if s < e:
+                found.append((k, line, s, e))
+        if not found:
+            return
+        release = all(is_on(line, s, e) for _, line, s, e in found)
+        spans = []
         with undoable(self.text):
-            if outside:
-                self.text.delete(b, f"{b}+{n}c")
-                self.text.delete(f"{a}-{n}c", a)
-                a = self.text.index(f"{a}-{n}c")
-                b = self.text.index(f"{a}+{len(sel)}c")
-            elif len(sel) > 2 * n and wrapped(run(sel), run(sel, True)):
-                self.text.delete(a, b)
-                self.text.insert(a, sel[n:-n])
-                b = self.text.index(f"{a}+{len(sel) - 2 * n}c")
-            else:
-                self.text.insert(b, wrap)
-                self.text.insert(a, wrap)
-                a = self.text.index(f"{a}+{n}c")
-                b = self.text.index(f"{a}+{len(sel)}c")
+            for k, line, s, e in found:
+                new, s, e = apply(line, s, e, release)
+                self._replace_line(k, new)
+                spans.append((k, s, e))
         self.text.tag_remove("sel", "1.0", "end")
-        self.text.tag_add("sel", a, b)
-        self.text.mark_set("insert", b)
+        if select:
+            a, b = f"{spans[0][0]}.{spans[0][1]}", f"{spans[-1][0]}.{spans[-1][2]}"
+            self.text.tag_add("sel", a, b)
+            self.text.mark_set("insert", b)
+
+    def _replace_line(self, n, new):
+        """n 行目を new に書き換える。変わった字だけを書き換え、カーソル・選択を同じ字のところに残す（行の選択が残り、
+        続けて押せるように）。"""
+        line = self.text.get(f"{n}.0", f"{n}.end")
+        for tag, i1, i2, j1, j2 in reversed(difflib.SequenceMatcher(None, line, new, autojunk=False).get_opcodes()):
+            if tag != "equal":
+                self.text.delete(f"{n}.{i1}", f"{n}.{i2}")
+                self.text.insert(f"{n}.{i1}", new[j1:j2])
 
     def _heading_lines(self):
         """見出しとして読まれる行 {エディターの行の番号（1 から）: 見出しの階層}。"""
@@ -233,6 +277,9 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
 
     def _heading_for_bold(self):
         """［太字］で同じ段の見出しをそろえるときの (行の番号, 見出しの階層)。そうでなければ None。"""
+        n = self._selected_heading_line()          # 見出しの行全体か、見出しの字すべて（見出しの前の空行と同じ）
+        if n is not None and _split_heading(self.text.get(f"{n}.0", f"{n}.end")) is not None:
+            return n, self._heading_lines()[n]
         a, b = self._sel_range(insert=True)
         n = int(a.split(".")[0])
         if int(b.split(".")[0]) != n:
@@ -248,13 +295,14 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
         return n, level
 
     def _bold_headings(self, n, level):
-        """同じ段（level）の見出しの行を、すべて太字にする（n 行目の見出しが太字なら、すべて外す）。Ctrl+Z 1回で戻せる。"""
+        """同じ段（level）と上の段（# の少ない段）の見出しの行を、すべて太字にする（n 行目の見出しが太字なら、
+        同じ段と下の段の見出しの太字を、すべて外す。見出しの前の空行と同じ。2026-10-28 班長指示）。Ctrl+Z 1回で戻せる。"""
         release = _whole_bold(_split_heading(self.text.get(f"{n}.0", f"{n}.end"))[1])
-        insert = self.text.index("insert")
+        sel = self._sel_range()
         with undoable(self.text):
             for k, lv in self._heading_lines().items():
                 line = self.text.get(f"{k}.0", f"{k}.end")
-                parts = _split_heading(line) if lv == level else None
+                parts = _split_heading(line) if ((lv >= level) if release else (lv <= level)) else None
                 if parts is None:
                     continue
                 prefix, body = parts
@@ -267,11 +315,18 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
                 else:
                     lead = plain[:len(plain) - len(plain.lstrip(" 　"))]
                     new = prefix + lead + "**" + core + "**" + plain[len(lead) + len(core):]
-                if new != line:
-                    self.text.delete(f"{k}.0", f"{k}.end")
-                    self.text.insert(f"{k}.0", new)
-        self.text.tag_remove("sel", "1.0", "end")
-        self.text.mark_set("insert", insert)
+                self._replace_line(k, new)      # カーソルは同じ字のところに残す（見出しの前の空行と同じ）
+        if sel:
+            # 選んだ範囲（行全体か、見出しの字すべて）を選び直す（ほかのボタンと同じく、続けて押せるように）
+            self.text.tag_remove("sel", "1.0", "end")
+            if sel[0] == f"{n}.0":
+                self.text.tag_add("sel", f"{n}.0", f"{n + 1}.0" if sel[1] == f"{n + 1}.0" else f"{n}.end")
+            else:
+                line = self.text.get(f"{n}.0", f"{n}.end")
+                prefix, body = _split_heading(line)
+                start = len(prefix) + len(body) - len(body.lstrip(" 　"))
+                self.text.tag_add("sel", f"{n}.{start}", f"{n}.{len(line.rstrip(' 　'))}")
+        self.text.see("insert")
 
     # ---------- 見出しの前の空行（2026-10-28 班長決定） ----------
     # VAスタイルの「段落前に1行空ける」に当たる。［太字］で同じ段の見出しをそろえるのと同じく、見出しの行全体（または
@@ -388,10 +443,13 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
         # 区切りの行の列の配置は、カーソル（選んだ範囲）が区切りの行の中だけにあるときに変える
         columns = self._table_cells(separator=True) if mark in (CENTER_MARK, RIGHT_MARK) and not cells else []
         first, last = self._line_range()
+        # 字のない行は、選んだ行がすべて字のない行のときだけ記号を付け、カーソルを行末に置く（［見出し］などと同じ。
+        # 字のある行と一緒に選んだ字のない行〔1行の空き〕には付けない。2026-10-28 班長指示）
+        blank = not cells and not columns and self._blank_range()
         rows = []
         for n in range(first, last + 1):
             line = self.text.get(f"{n}.0", f"{n}.end")
-            if _structural_line(line):
+            if _structural_line(line) or (not blank and not line.strip(" 　\t")):
                 continue
             rows.append((n, line, move_wraps_after_marks(line)))
         if not rows and not cells and not columns:
@@ -407,16 +465,10 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
             for n, line, norm in rows:
                 # 「**:=: 準備書面**」は「:=: **準備書面**」として扱う。配置の記号は付け替え、
                 # ->N・[HEADER] は残す（記号の順は、ヘッダー・配置・インデント）
-                lead = split_lead_marks(norm)
-                rest = lead.rest
-                prefix = lead._replace(align="" if release else mark, rest="").join()
-                if norm != line:
-                    self.text.delete(f"{n}.0", f"{n}.end")
-                    self.text.insert(f"{n}.0", prefix + rest)
-                elif prefix != line[:len(line) - len(rest)]:
-                    # 記号の部分だけを書き換える（行の選択が残るように）
-                    self.text.delete(f"{n}.0", f"{n}.{len(line) - len(rest)}")
-                    self.text.insert(f"{n}.0", prefix)
+                # 変わった字だけを書き換える（行の選択が残るように）
+                self._replace_line(n, split_lead_marks(norm)._replace(align="" if release else mark).join())
+        if blank and rows:
+            self._caret_to_line_end()
 
     def on_indent(self):
         """選んだ行（なければカーソルの行）に ->1 を付ける。対象の行がすべて既に ->N なら外す（ほかの
@@ -474,16 +526,7 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
                 line = self.text.get(f"{n}.0", f"{n}.end")
                 new = change(line, n)
                 if new is not None and new != line:
-                    # 変わった所だけを書き換える（前後の同じ字は残す。行の選択が残り、続けて押せるように）
-                    head = 0
-                    while head < min(len(line), len(new)) and line[head] == new[head]:
-                        head += 1
-                    tail = 0
-                    while (tail < min(len(line), len(new)) - head
-                           and line[len(line) - 1 - tail] == new[len(new) - 1 - tail]):
-                        tail += 1
-                    self.text.delete(f"{n}.{head}", f"{n}.{len(line) - tail}")
-                    self.text.insert(f"{n}.{head}", new[head:len(new) - tail])
+                    self._replace_line(n, new)      # 変わった所だけ（行の選択が残り、続けて押せるように）
 
     def _heading_level_before(self, n):
         """n 行目より前の、いちばん近い見出しの階層（なければ 0）。"""
@@ -507,12 +550,15 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
         直前に見出しがなければ、［見出し］と同じ ## にする（公用文では第１のレベルを基本的に使わないため。
         2026-10-25 班長指示）。
         字のない行も、見出しの記号だけの行にする（選んだ行がすべて字のない行のとき。2026-10-25 班長指示）。
+        配置の記号の付いた行（「:-: ## 見出し」「:-: 本文」）は、配置の記号を残してレベルを変える・見出しにする（上げ下げが
+        見出しと本文の間で回るように。2026-10-28 班長指示）。
         """
         blank = self._blank_range()
 
         def change(line, n):
             if blank:
                 return "#" * self._level_for_plain(n) + " "
+            prefix, line = _split_align(line) or ("", line)
             if _special_line(line):
                 return None
             line = move_wraps_after_marks(line)     # 「**# 見出し**」は「# **見出し**」として扱う
@@ -520,11 +566,11 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
             if m:
                 level = len(m.group(1)) + step
                 if level < 1 or level > 9:
-                    return line[m.end():]
-                return "#" * level + " " + line[m.end():]
+                    return prefix + line[m.end():]
+                return prefix + "#" * level + " " + line[m.end():]
             if line.strip():
                 level = self._level_for_plain(n)
-                return "#" * level + " " + _strip_list(line.lstrip(" 　"))
+                return prefix + "#" * level + " " + _strip_list(line.lstrip(" 　"))
             return None
         self._edit_lines(change)
         if blank:
@@ -545,7 +591,8 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
         """選んだ行（なければカーソルの行）を、見出し（## ）・箇条書き（- ）・段落番号（1. ）にする（2026-10-25 班長指示）。
         ほかの見出し・箇条書き・段落番号の記号は付け替える。対象の行がすべて既にその種類なら、記号を外して本文に
         戻す（見出しは、どのレベルでも見出しとみなす。レベルは、エディターで # の数を直す）。表・改ページなどの記号の行・
-        区切りの行と、配置・->N・[HEADER] の記号のある行には付けない（見出しのレベルの上げ下げと同じ）。
+        区切りの行と、配置・->N・[HEADER] の記号のある行には付けない。ただし、配置の記号の付いた見出し（「:-: ## 見出し」）は、
+        配置の記号を残して変える（2026-10-28 班長指示）。
         字のない行は、選んだ行がすべて字のない行のときだけ記号を付け、カーソルを行末に置く（まだ打っていない行を
         見出しなどにしてから書くため。2026-10-25 班長指示）。字のある行と一緒に選んだ字のない行（1行の空き）には
         付けない。Ctrl+Z 1回で戻せる。"""
@@ -553,13 +600,16 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
 
         def target(line):
             if blank:
-                return "", ""
+                return "", "", ""
+            split = _split_align(line)
+            prefix, line = split if split and HEADING_MARK_RE.match(split[1]) else ("", line)
             if _special_line(line):
                 return None
             body = move_wraps_after_marks(line).lstrip(" 　")   # 「**# 見出し**」は「# **見出し**」として扱う
             kind, end = _paragraph_kind(body)
-            return kind, body[end:]
-        self._toggle_lines(target, lambda p: p[0] == mark, lambda p, release: ("" if release else mark) + p[1])
+            return kind, body[end:], prefix
+        self._toggle_lines(target, lambda p: p[0] == mark,
+                           lambda p, release: p[2] + ("" if release else mark) + p[1])
         if blank:
             self._caret_to_line_end()
 
@@ -581,8 +631,14 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
         self._edit_lines(change)
 
     def on_line_mark(self, mark):
-        """カーソルの行の前に、改ページなどの記号だけの行を入れる。"""
+        """カーソルの行の前に、改ページなどの記号だけの行を入れる。カーソルが表の中にあれば、表の前に入れる（表を
+        分けないため。行頭の記号のボタンも、表の行では何もしない。2026-10-28 班長指示）。"""
         n = int(self.text.index("insert").split(".")[0])
+
+        def table(k):
+            return is_table_line(self.text.get(f"{k}.0", f"{k}.end"))
+        while n > 1 and table(n) and table(n - 1):
+            n -= 1
         self.text.insert(f"{n}.0", mark + "\n")
 
     def on_find(self, replace):
@@ -663,6 +719,34 @@ def _special_line(line):
     lead = split_lead_marks(move_wraps_after_marks(line))
     return (not line.strip() or _structural_line(line)
             or bool(lead.align or lead.left or lead.area))
+
+
+# 選んだ字の末尾で終わる「]{N}」（均等割付の閉じ。on_distribute）
+_CLOSE_AT_END_RE = re.compile(DISTRIBUTE_CLOSE_RE.pattern + r"\Z")
+
+
+def _lead_len(line):
+    """行頭の記号（ヘッダー・配置・->N・字下げの空白・見出し・箇条書き・段落番号）の字数。字を囲む記号は、この後ろに
+    付ける（->N・[HEADER] の後の見出しなどの記号は、見出しなどにならないので字として囲む。move_wraps_after_marks と同じ）。"""
+    lead = split_lead_marks(line)
+    rest = lead.rest
+    k = len(rest) - len(rest.lstrip(" 　"))
+    if not (lead.left or lead.area):
+        m = HEADING_MARK_RE.match(rest, k) or LIST_MARK_RE.match(rest, k)
+        if m:
+            k = m.end()
+    return len(line) - len(rest) + k
+
+
+def _split_align(line):
+    """配置の記号だけが付いた行（「:-: ## 見出し」「:-: 本文」。配置の記号の付いた見出しは、組むときも見出しとして読む）を
+    (配置の記号まで, その後ろ) に分ける（「**:-: ## 見出し**」の形も扱う）。->N・[HEADER] もある行と、配置の記号のない行は
+    None。"""
+    line = move_wraps_after_marks(line)
+    lead = split_lead_marks(line)
+    if not lead.align or lead.left or lead.area:
+        return None
+    return line[:len(line) - len(lead.rest)], lead.rest
 
 
 def _split_heading(line):
