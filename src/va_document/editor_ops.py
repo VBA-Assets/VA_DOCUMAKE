@@ -398,20 +398,25 @@ class EditorMixin(EditorMarkMixin, TableCellMixin, ImageMixin):
         self.text.tag_remove("sel", "1.0", "end")
         self.text.see("insert")
 
-    def _follow_same_level(self, lines):
+    def _follow_same_level(self, lines, headings=()):
         """［見出し］・Alt+Shift+←／→ で見出しにした（レベルを変えた）行 lines（エディターの行の番号）に、直前の同じ段の
-        見出しの「前の空行」と「見出し全体の太字」をならって付ける（2026-10-29 班長指示）。付けるだけで、外さない
-        （利用者が付けたものを消さないため）。直前の見出しは、lines のほかの行を除いて探す（一緒に見出しにした行に
-        ならわないため）。前の空行は、文書の先頭・改ページとセクション区切りの直後・直前が見出しの見出しには、空けるかどうかが
-        表れないので、その前の同じ段の見出しを見る。入れるときも、見出しの前の空行と同じく、二重に空けないよう、それらの
-        見出しには入れない。太字は、字のない見出し（まだ打っていない行）には付けない。"""
+        見出しの「前の空行」と「見出し全体の太字」をならって付ける（2026-10-29 班長指示）。もとから見出しだった行
+        （headings。レベルを変えた行）は、直前の同じ段の見出しになければ外す（前のレベルでならって付いたものが残らない
+        ように。2026-10-29 班長指示）。本文から見出しにした行は、付けるだけで外さない（利用者が付けた空行・太字を
+        消さないため）。前に同じ段の見出しがなければ、後の同じ段の見出しに合わせる（その段の最初の見出しで付け外しできる
+        ように。2026-10-29 班長指示）。どちらにもなければ、何もしない。同じ段の見出しは、lines のほかの行を除いて探す（一緒に
+        見出しにした行にならわないため）。前の空行は、文書の先頭・改ページとセクション区切りの直後・直前が見出しの見出しには、
+        空けるかどうかが表れないので、その次に近い同じ段の見出しを見る。入れるときも、見出しの前の空行と同じく、二重に空けない
+        よう、それらの見出しには入れない。太字は、字のない見出し（まだ打っていない行）には付けない。"""
         paras = [p for p in parse(self.raw_text().split("\n"), self.session.doc_type) if not p.area]
         heads = {p.src_line + 1: k for k, p in enumerate(paras) if p.kind == HEADING}
-        jobs = []
+        jobs = []                   # (行, 空行, 太字)。それぞれ True は付ける、False は外す、None は変えない
         for n in sorted(set(lines) & set(heads)):
             k = heads[n]
             space = bold = None
-            for m in sorted((m for m in heads if m < n and m not in lines), reverse=True):
+            others = [m for m in heads if m not in lines]
+            # 前の同じ段の見出しを近い順に見て、決まらなければ後の見出しを近い順に見る（その段の最初の見出しのため）
+            for m in sorted((m for m in others if m < n), reverse=True) + sorted(m for m in others if m > n):
                 p = paras[heads[m]]
                 if p.level != paras[k].level:
                     continue
@@ -423,18 +428,28 @@ class EditorMixin(EditorMarkMixin, TableCellMixin, ImageMixin):
                     bold = _whole_bold(parts[1])
                 if space is not None and bold is not None:
                     break
-            jobs.append((n, space and k > 0 and _needs_space(paras[k - 1]), bold))
-        if not any(space or bold for _, space, bold in jobs):
+            b = paras[k - 1] if k else None
+            if space:
+                space = True if _needs_space(b) else None
+            elif space is False:
+                # 外すのは、すぐ上の行の空行1行だけ
+                space = False if n in headings and b is not None and b.kind == BLANK and b.src_line + 2 == n else None
+            if bold is False and n not in headings:
+                bold = None
+            jobs.append((n, space, bold))
+        if all(space is None and bold is None for _, space, bold in jobs):
             return
         with undoable(self.text):
-            for n, space, bold in reversed(jobs):      # 下の行から（空行を入れても、上の行の番号は変わらない）
+            for n, space, bold in reversed(jobs):      # 下の行から（空行を入れ外ししても、上の行の番号は変わらない）
                 parts = _split_heading(self.text.get(f"{n}.0", f"{n}.end"))
-                if bold and parts and not _whole_bold(parts[1]):
-                    new = _bold_heading_line(*parts, False)
+                if bold is not None and parts and _whole_bold(parts[1]) != bold:
+                    new = _bold_heading_line(*parts, not bold)
                     if new is not None:
                         self._replace_line(n, new)
                 if space:
                     self.text.insert(f"{n}.0", "\n")
+                elif space is False:
+                    self.text.delete(f"{n - 1}.0", f"{n}.0")
 
     def _sel_range(self, insert=False):
         """選んだ範囲の (先頭, 末尾) の位置。選んでいなければ、insert が真ならカーソルの位置を2つ、偽なら None。"""
@@ -589,7 +604,8 @@ class EditorMixin(EditorMarkMixin, TableCellMixin, ImageMixin):
         字のない行も、見出しの記号だけの行にする（選んだ行がすべて字のない行のとき。2026-10-25 班長指示）。
         配置の記号の付いた行（「:-: ## 見出し」「:-: 本文」）は、配置の記号を残してレベルを変える・見出しにする（上げ下げが
         見出しと本文の間で回るように。2026-10-28 班長指示）。
-        見出しにした（レベルを変えた）行には、直前の同じ段の見出しにならって、前の空行と太字を付ける（2026-10-29 班長指示）。
+        見出しにした（レベルを変えた）行には、直前の同じ段の見出しにならって、前の空行と太字を付ける（レベルを変えた見出しは、
+        直前の同じ段の見出しになければ外す。2026-10-29 班長指示）。
         """
         blank = self._blank_range()
 
@@ -610,8 +626,9 @@ class EditorMixin(EditorMarkMixin, TableCellMixin, ImageMixin):
                 level = self._level_for_plain(n)
                 return prefix + "#" * level + " " + _strip_list(line.lstrip(" 　"))
             return None
-        with undoable(self.text):          # ならって付けるのも含めて、Ctrl+Z 1回で戻せる
-            self._follow_same_level(self._edit_lines(change))
+        headings = set(self._heading_lines())
+        with undoable(self.text):          # ならって付ける・外すのも含めて、Ctrl+Z 1回で戻せる
+            self._follow_same_level(self._edit_lines(change), headings)
         if blank:
             self._caret_to_line_end()
 
@@ -634,7 +651,8 @@ class EditorMixin(EditorMarkMixin, TableCellMixin, ImageMixin):
         配置の記号を残して変える（2026-10-28 班長指示）。
         字のない行は、選んだ行がすべて字のない行のときだけ記号を付け、カーソルを行末に置く（まだ打っていない行を
         見出しなどにしてから書くため。2026-10-25 班長指示）。字のある行と一緒に選んだ字のない行（1行の空き）には
-        付けない。見出しにした行には、直前の同じ段（##）の見出しにならって、前の空行と太字を付ける（2026-10-29 班長指示）。
+        付けない。見出しにした行には、直前の同じ段（##）の見出しにならって、前の空行と太字を付ける（ほかのレベルの見出しから
+変えた行は、直前の同じ段の見出しになければ外す。2026-10-29 班長指示）。
         Ctrl+Z 1回で戻せる。"""
         blank = self._blank_range()
 
@@ -648,11 +666,12 @@ class EditorMixin(EditorMarkMixin, TableCellMixin, ImageMixin):
             body = move_wraps_after_marks(line).lstrip(" 　")   # 「**# 見出し**」は「# **見出し**」として扱う
             kind, end = _paragraph_kind(body)
             return kind, body[end:], prefix
-        with undoable(self.text):          # ならって付けるのも含めて、Ctrl+Z 1回で戻せる
+        headings = set(self._heading_lines())
+        with undoable(self.text):          # ならって付ける・外すのも含めて、Ctrl+Z 1回で戻せる
             changed = self._toggle_lines(target, lambda p: p[0] == mark,
                                          lambda p, release: p[2] + ("" if release else mark) + p[1])
             if mark == HEADING_BUTTON_MARK:
-                self._follow_same_level(changed)
+                self._follow_same_level(changed, headings)
         if blank:
             self._caret_to_line_end()
 

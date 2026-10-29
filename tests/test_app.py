@@ -1315,7 +1315,8 @@ def test_heading_space_keys_reach_the_editor(window):
 
 def test_new_heading_follows_previous_heading_of_same_level(window):
     """［見出し］・Alt+Shift+←／→ で見出しにした行には、直前の同じ段の見出しにならって、前の空行と見出し全体の太字を付ける。
-    付けるだけで外さない。Ctrl+Z 1回で、見出しにする前に戻る（2026-10-29 班長指示）。"""
+    レベルを変えた見出しは、直前の同じ段の見出しになければ外す（本文から見出しにした行は付けるだけ）。Ctrl+Z 1回で、
+    見出しにする前に戻る（2026-10-29 班長指示）。"""
     def lines():
         return window.raw_text().rstrip("\n").split("\n")
     window.text.tag_remove("sel", "1.0", "end")
@@ -1339,7 +1340,8 @@ def test_new_heading_follows_previous_heading_of_same_level(window):
     window.text.mark_set("insert", "6.0")
     window.on_outline(1)                                  # 本文を下げると直前の見出し（###）と同じ段
     assert lines()[4:] == ["本文。", "", "### 次。"]
-    window.on_outline(-1)                                 # ## に上げると、直前の ## にならって太字。空行は外さない
+    window.on_outline(-1)                                 # ## に上げると、直前の ## にならって太字。空行は、直前の ## が
+                                                          # 文書の先頭で空けるかが表れないので、変えない
     assert lines()[4:] == ["本文。", "", "## **次。**"]
     window.text.edit_undo()
     assert lines()[4:] == ["本文。", "", "### 次。"]
@@ -1358,6 +1360,38 @@ def test_new_heading_follows_previous_heading_of_same_level(window):
     window.on_paragraph_kind(HEADING_BUTTON_MARK)
     window.text.tag_remove("sel", "1.0", "end")
     assert lines()[3:] == ["本文。", "", "## **一。**", "## **二。**"]
+    # レベルを変えた見出しは、直前の同じ段の見出しになければ外す（2026-10-29 班長指示）。本文から見出しにした行は外さない
+    window._load_text("前文。\n\n## **小一**\n本文。\n### 細一\n本文。\n次。")
+    window.text.mark_set("insert", "7.0")
+    window.on_outline(1)                                  # 本文 → ###（直前の ### は空行・太字なし。本文からなので外すものもない）
+    assert lines()[-2:] == ["本文。", "### 次。"]
+    window.on_outline(-1)                                 # ### → ##：直前の ## にならって空行と太字を付ける
+    assert lines()[-3:] == ["本文。", "", "## **次。**"]
+    window.on_outline(1)                                  # ## → ###：直前の ### にないので、空行と太字を外す
+    assert lines()[-2:] == ["本文。", "### 次。"]
+    window.text.edit_undo()                               # Ctrl+Z 1回で、レベルを変える前に戻る
+    assert lines()[-3:] == ["本文。", "", "## **次。**"]
+    window._load_text("## 小一\n本文。\n\n**次。**")       # 本文から見出しにした行の空行・太字は、利用者のものなので残す
+    window.text.mark_set("insert", "4.0")
+    window.on_paragraph_kind(HEADING_BUTTON_MARK)
+    assert lines()[1:] == ["本文。", "", "## **次。**"]
+    window._load_text("# **第一**\n本文。\n\n### **細一**")  # 前にも後にも同じ段の見出しがなければ、変えない
+    window.text.mark_set("insert", "4.0")
+    window.on_outline(-1)
+    assert lines()[1:] == ["本文。", "", "## **細一**"]
+    # 前に同じ段の見出しがなければ、後の同じ段の見出しに合わせる（その段の最初の見出し。2026-10-29 班長指示）
+    window._load_text("# 第一\n本文。\n### 細一\n本文。\n\n## **小二**\n本文。")
+    window.text.mark_set("insert", "3.0")
+    window.on_outline(-1)                                 # ### → ##：後の ## にならって空行と太字を付ける
+    assert lines()[:6] == ["# 第一", "本文。", "", "## **細一**", "本文。", ""]
+    window._load_text("# 第一\n本文。\n\n## **小一**\n本文。\n### 細二\n本文。")
+    window.text.mark_set("insert", "4.0")
+    window.on_outline(1)                                  # ## → ###：後の ### にないので、空行と太字を外す
+    assert lines() == ["# 第一", "本文。", "### 小一", "本文。", "### 細二", "本文。"]
+    window._load_text("前文。\n小一\n本文。\n\n## **小二**")  # ［見出し］で本文を見出しにしたときも、後の ## に合わせて付ける
+    window.text.mark_set("insert", "2.0")
+    window.on_paragraph_kind(HEADING_BUTTON_MARK)
+    assert lines()[:3] == ["前文。", "", "## **小一**"]
     # 字のない行を見出しにしたときは、空行を入れ、カーソルをその見出しの行末に置く（太字は字を打ってから）
     window._load_text("本文。\n\n## **小一**\n本文。\n")
     window.text.mark_set("insert", "5.0")
