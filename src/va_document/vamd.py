@@ -17,8 +17,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .doctypes import DEFAULT_DOC_TYPE, DOC_TYPES, NAIYOU, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_LABELS, can_one_width
-from .document import (BODY, JUSTIFY, cell_align_mark, is_line_mark, move_wraps_after_marks, parse, parse_separator,
-                       split_cells, split_lead_marks)
+from .document import (BODY, JUSTIFY, cell_align_mark, image_mark, image_numbers, is_line_mark, move_wraps_after_marks,
+                       parse, parse_separator, split_cells, split_lead_marks)
 from .pseudonym import tokens_in
 
 EXTENSION = ".vamd"
@@ -32,12 +32,12 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 AI_MARKER_RE = re.compile(r"^\s*<\?[A-Za-z_][\w:.-]*\?>\s*$")
 
 
-PROMPT = """このファイルは、ツール「VA Document」の構文ファイル（AI に渡すために、実名を記号に置き換えたもの）です。「==== VA Document」で始まる区切りの行より上は AI への指示、下は編集する文書です。
+PROMPT = """このファイルは、ツール「VA Document」の構文ファイル（AI に渡すために、実名を記号に置き換えたもの）である。「==== VA Document」で始まる区切りの行より上は AI への指示、下は編集する文書である。
 
 1　状況
-私は、法律事務所などで使う文書を、ツール「VA Document」で作っている。VA Documentは、区切りの行より下のマークダウンを読み込み、見出しの番号・インデント・配置を自動で付けて、裁判所提出書類などの書式の PDF に組む。
-依頼者などの実名を AI に渡さないため、人名・法人名・地名・番号などは、〔人名Ａ〕〔法人Ｘ〕〔人名ＹＴ〕〔地名１〕〔その他甲〕のような記号（〔 〕の中は、種別〔人名・法人・地名・番号・その他〕の後に、英字・数字・漢字などの字）に置き換えてある。同じ記号は、文書のどこでも同じ語を表す。記号の中の字は私が決めたもので、元の語とは関係がない。VA Documentは、あなたの回答を取り込むときに、記号を文字どおりに探して元の語に戻す。記号が少しでも変わると（括弧が［］や()に変わる、中の字が変わる、「同人」「同社」に言い換えられる）、その部分は元に戻らない。
-行の先頭の「:=: 」は表題、「:-: 」は中央揃え、「--: 」は右揃え、「:-- 」は左揃えの記号（マークダウンの表の区切りの行と同じく、コロンのある側に寄せる。記号の後に半角空白を1つ置く）、「->2 」は段落の左インデントを全角2字にする記号（数字が字数。半角で書く）、「[HEADER] 」はその行をヘッダー（文書の最初のページと、セクション区切りの直後のページの上の余白。「別紙」などを書く）に、「[FOOTER] 」はフッター（各ページの下の余白）に出す記号（配置の記号と一緒に使うことがある）である。表のセルの先頭の「:-: 」「--: 」「:-- 」も、そのセルの配置の記号である。その行だけを書いた <<< は改ページ、<<<= はセクション区切り（改ページして見出しの番号を振り直す）、[TOC] は目次を組む位置の記号である（[TOC:2] のように、載せる見出しのレベルを書き添えることがある）。段落の頭（行頭の記号の後ろでもよい）の全角空白は、段落の1行目を1字下げる字下げである。**語** は太字（ゴシック体）の記号、*語* は傍点（字の上の点）の記号、[語]{5} は語を5字の幅に均等に割り付ける記号、==語== は私が画面で付けた目印（蛍光ペン。PDF には出ない）である。空の行は、そのまま1行の空きになる。VA Documentは、この記号で表題・中央揃え・右揃え・改ページなどを決める。記号が消えると、配置が失われる。
+区切りの行より下の文書は、ツール「VA Document」で作っている文書である。VA Documentは、このマークダウンを読み込み、見出しの番号・インデント・配置を自動で付けて、区切りの行に書いてある文書の種類（裁判所提出書類・公用文・契約書など）の書式の PDF に組む。
+人や会社の実名を AI に渡さないため、人名・法人名・地名・番号などは、〔人名Ａ〕〔法人Ｘ〕〔人名ＹＴ〕〔地名１〕〔その他甲〕のような記号（〔 〕の中は、種別〔人名・法人・地名・番号・その他〕の後に、英字・数字・漢字などの字）に置き換えてある。同じ記号は、文書のどこでも同じ語を表す。記号の中の字は私が決めたもので、元の語とは関係がない。VA Documentは、あなたの回答を取り込むときに、記号を文字どおりに探して元の語に戻す。記号が少しでも変わると（括弧が［］や()に変わる、中の字が変わる、「同人」「同社」に言い換えられる）、その部分は元に戻らない。
+行の先頭の「:=: 」は表題、「:-: 」は中央揃え、「--: 」は右揃え、「:-- 」は左揃えの記号（マークダウンの表の区切りの行と同じく、コロンのある側に寄せる。記号の後に半角空白を1つ置く）、「->2 」は段落の左インデントを全角2字にする記号（数字が字数。半角で書く）、「[HEADER] 」はその行をヘッダー（文書の最初のページと、セクション区切りの直後のページの上の余白。「別紙」などを書く）に、「[FOOTER] 」はフッター（各ページの下の余白）に出す記号（配置の記号と一緒に使うことがある）である。表のセルの先頭の「:-: 」「--: 」「:-- 」も、そのセルの配置の記号である。その行だけを書いた <<< は改ページ、<<<= はセクション区切り（改ページして見出しの番号を振り直す）、[TOC] は目次を組む位置の記号である（[TOC:2] のように、載せる見出しのレベルを書き添えることがある）。その行だけを書いた [IMAGE 1]{30} は、画像を置く位置の記号である（1 は画像の番号、30 は画像の幅の字数。行頭に「--: 」があれば画像を右に置き、続く段落を画像の左側に回り込ませる）。画像そのものは、あなたに渡していない（画像は記号に置き換えられないため）。段落の頭（行頭の記号の後ろでもよい）の全角空白は、段落の1行目を1字下げる字下げである。**語** は太字（ゴシック体）の記号、*語* は傍点（字の上の点）の記号、[語]{5} は語を5字の幅に均等に割り付ける記号、==語== は私が画面で付けた目印（蛍光ペン。PDF には出ない）である。空の行は、そのまま1行の空きになる。VA Documentは、この記号で表題・中央揃え・右揃え・改ページなどを決める。記号が消えると、配置が失われる。
 区切りの行には、文書ID・版と、文書の種類などの設定が書いてある。VA Documentは、回答の最初の行にある区切りの行で、どの文書のどの版をもとにした回答かを確かめる。区切りの行がないと、回答を取り込めない。
 
 2　任務
@@ -47,6 +47,7 @@ VA Documentに取り込ませるだけで、実名に戻った文書が正しい
 必ず達成すること：
 ・記号（〔人名Ａ〕など）は、括弧と中の字を含めて一字も変えずに書く。言い換えない。新しい記号を作らない。記号の中身を推測しない。
 ・配置の記号（:=: :-: --: :-- ->2 など）と、ヘッダー・フッターの記号（[HEADER] [FOOTER]）、改ページの記号（<<< <<<=）、目次の記号（[TOC] [TOC:2] など）は、元の行にそのまま残す（記号の後の半角空白も残す）。新しく付けるのは、私が求めたときだけとする。
+・画像の記号（[IMAGE 1]{30}）の行は、消さず、番号を変えず、新しく作らない。行の位置を動かすことと、幅の数字を変えることは構わない。
 ・段落の頭の全角空白（字下げ）は、元の行にそのまま残す。新しく段落を書くときは、前後の段落に合わせて、頭に全角空白を置くかどうかを決める。
 ・空行を入れない。元の文書にある空の行は、そのまま残す（空の行は、PDF で1行の空きになる）。ただし、元の文書で、同じ階層（# の数が同じ）の見出しの前に空の行を置いているときは、新しく書くその階層の見出しの前にも、空の行を1行置く（文書の先頭、<<< <<<= の直後、直前が空の行・見出しのときを除く）。
 ・見出しは # の数で階層を表す（# が第１、## が１、### が(1)…）。見出しに番号を書かない。# だけの行のすぐ後に見出しを書くと、2つの見出しを1行にまとめる（「第１　１　当事者」。複合見出し）。表題・日付・宛先など、最初の見出しより前の行には # を付けない。
@@ -57,7 +58,7 @@ VA Documentに取り込ませるだけで、実名に戻った文書が正しい
 
 4　使えるもの・制約
 ・記号の後に「さん」「様」などを付けるのは構わない。
-・このファイルと同じフォルダにあるほかの構文ファイル（.vamd）は、別の事件の文書である。開いたり、内容を参考にしたりしない（記号は文書ごとに別の語を表す）。
+・このファイルと同じフォルダにあるほかの構文ファイル（.vamd）は、別の案件の文書である。開いたり、内容を参考にしたりしない（記号は文書ごとに別の語を表す）。
 ・記号は文書ごとに振っている。この会話で前に扱った文書や、添付された文書の記号は、この文書の同じ記号と別の語を表すことがある。ほかの文書の記号を、この文書にそのまま書き写さない。
 ・記号の扱いについて確かめたいことがあれば、回答する前に質問すること。
 
@@ -77,10 +78,14 @@ PREVIOUS_PROMPTS = {
     "c293b7da0341d8c303a0fa4f11a7d36d48c387dfca6c1acaceaf3a4ee6dcd2ba",   # Ver200・Ver210・Ver211
     "ebf82c3a20776b967575fa8d1d127be53ce3ad7f2ced6ad5e7f6b61210edb287",   # Ver220
     "30b5cdd9d81798eb3cf88831335ad5fedde648522fd4867dbc632689d3895a08",   # Ver230・Ver231・Ver240
+    "425089d4a0e4ac7005c7e1b58b5fc7efa1f28b9d1068c192c4e2e4999130d722",   # Ver240 の次の版の作業中（命令文の「〜せよ」を改めた。配っていない）
+    "96b017a0e4bf85cd49fb98852783e4b5cfd613c7aeb8598989c6be0857f81bb5",   # Ver250 の作業中（画像の記号を足した。配っていない）
+    "426b6612795fb86f8a3d7e9644b51f436302cbf3f25e4fc6bc067ed640fb7431",   # Ver250 の作業中（「別の事件の文書」を「別の案件の文書」に。配っていない）
+    "07968024fdfab1024ba0412d5d5ff17addad8cf274fb251832180f2079799136",   # Ver250 の作業中（書き出しをツールの働きだけを書く形に。配っていない）
 }
 # 今の版の既定の指示の SHA-256。PROMPT を直すと試験（test_vamd）が落ちるので、そのときは、この値を PREVIOUS_PROMPTS に
 # 移してから、新しい値に替える（前の版の登録を忘れないため。2026-10-28）
-PROMPT_SHA256 = "425089d4a0e4ac7005c7e1b58b5fc7efa1f28b9d1068c192c4e2e4999130d722"   # Ver240 の次の版〜（命令文の「〜せよ」を改めた。2026-10-29 班長指示）
+PROMPT_SHA256 = "42dc03c59fe3b3c0e097f1cc75daf78205668925ab397f6644b9405f49d8b85f"   # Ver250〜（書き出しをツールの働きだけを書く形に改め、「依頼者などの実名」を「人や会社の実名」に、冒頭の「です」を「である」に改めた。2026-10-29 班長決定）
 
 
 def is_default_prompt(prompt):
@@ -271,10 +276,13 @@ class Review:
     changes: list = field(default_factory=list)          # [(種類, 今の行のリスト, 回答の行のリスト)]。種類は 変更・削除・追加
     changed_lines: list = field(default_factory=list)    # 回答で変わった・増えた行（回答の文書の何行目か。0 から）
     removed: list = field(default_factory=list)          # 回答で消えた段落（今の文章の行。変わったのではなく、なくなったもの）
+    unknown_images: list = field(default_factory=list)   # 今の文書にない画像の番号（AI が作った [IMAGE n]）
+    added_images: list = field(default_factory=list)     # 回答で増えた画像の行の番号（AI が行を写した）
 
     @property
     def clean(self):
-        return not (self.older or self.newer or self.unknown_tokens or self.lost_tokens or self.lost_marks)
+        return not (self.older or self.newer or self.unknown_tokens or self.lost_tokens or self.lost_marks
+                    or self.unknown_images or self.added_images)
 
 
 def _marks(lines):
@@ -290,6 +298,9 @@ def _marks(lines):
                 out += [(m.strip(), ln) for m in map(cell_align_mark, split_cells(s)) if m]
             continue
         lead = split_lead_marks(move_wraps_after_marks(ln))
+        image = image_mark(ln)
+        if image:
+            out.append((f"[IMAGE {image[0]}]", ln))     # 幅の字数は比べない（直してよい）
         if lead.left:
             out.append(("->N", ln))     # 字数は比べない（直してよい）
         # ヘッダー・フッターの記号は、大文字・小文字を比べない
@@ -310,8 +321,8 @@ def _indents(lines):
             and (not p.body_level or p.left_indent is not None or p.area)]
 
 
-def review(content, doc_id, version, current_body, dictionary):
-    """AI の回答（content）を、今の文章（current_body：記号入りの行のリスト）と比べる。
+def review(content, doc_id, version, current_body, dictionary, images=()):
+    """AI の回答（content）を、今の文章（current_body：記号入りの行のリスト）と比べる。images は、データのある画像の番号。
 
     文書ID が違えば OtherDocument を出す（取り込む前に止める）。版の違いは止めずに知らせる
     （AI は会話の途中、最初に渡された版の番号を書き続けるため。2026-10-23 の往復試験）。
@@ -323,6 +334,12 @@ def review(content, doc_id, version, current_body, dictionary):
     old_tokens = tokens_in("\n".join(current_body))
     r.unknown_tokens = [t for t in dict.fromkeys(new_tokens) if dictionary.find(t) is None]
     r.lost_tokens = [t for t in dict.fromkeys(old_tokens) if t not in new_tokens]
+    # 画像の行：消えたものは配置などの記号と同じく知らせる（lost_marks）。増えたものは、今の文書にない番号（AI が作った
+    # もの）と、同じ番号の行が増えたもの（AI が行を写したもの）に分けて知らせる（2026-10-29）
+    old_images, new_images = Counter(image_numbers(current_body)), Counter(image_numbers(content.body))
+    for n, c in new_images.items():
+        if c > old_images[n]:
+            (r.added_images if old_images[n] or n in images else r.unknown_images).append(n)
     new_marks = Counter(m for m, _ in _marks(content.body))
     new_lines = Counter(_marks(content.body))
     # 回答に同じ行がそのまま残っていれば、その行の記号は残ったとみなしてから、記号の数を比べる（どの行の記号が

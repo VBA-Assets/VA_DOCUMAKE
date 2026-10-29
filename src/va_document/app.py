@@ -367,6 +367,9 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         for label, mark in (("改ページ", PAGE_BREAK_MARK), ("セクション区切り", SECTION_BREAK_MARK),
                             ("目次", TOC_MARK)):   # 載せる見出しのレベルは手で直す（2026-10-24）
             g.small(label, lambda m=mark: self.on_line_mark(m))
+        # ［画像］：画像ファイルを選んで [IMAGE n]{幅} の行を入れる。クリップボードの画像は Ctrl+V（Win+V も）で入れる
+        # （2026-10-29 班長決定）
+        g.small("画像", self.on_image)
         # 見出しの前の空行は、ボタンを置かず、見出しの行を選んで Enter を押して同じ段にそろえる（2026-10-28 班長決定）
         # 検索・置換は「編集」の組にする（Word のリボンのホームのタブと同じ名前。2026-10-23 班長決定）
         g = rb.group("編集")
@@ -386,6 +389,9 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         title_row.pack(anchor="w")
         ttk.Label(title_row, text="仮名化した語").pack(side="left")
         ttk.Label(title_row, text="（ダブルクリックで編集）", style="Note.TLabel").pack(side="left")
+        # 同じ案件のほかの文書（書式付きファイル・構文ファイル）から、仮名化した語を今の一覧に足す（2026-10-29 班長決定）
+        ttk.Button(title_row, text="ファイルから読み込む", style="Small.TButton", command=self.on_load_entries
+                   ).pack(side="left", padx=(8, 0))
         tree_row = ttk.Frame(bottom)
         tree_row.pack(fill="x")
         self.tree = ttk.Treeview(tree_row, columns=("token", "word", "kind"), show="headings", height=4,

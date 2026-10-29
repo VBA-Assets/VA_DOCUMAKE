@@ -11,6 +11,7 @@ import fitz  # PyMuPDF
 from . import APP_NAME, config, naiyou, printing, vamd
 from .dialogs import ChangedOutsideDialog, MissingDialog, NaiyouDialog, PrintDialog
 from .doctypes import PAGE_NUMBER_LABELS, PAGE_NUMBER_NONE
+from .document import image_mark
 from .pdfwriter import FontNotEmbeddable
 from .pseudonym import TOKEN_RE
 from .recover import PdfMismatch
@@ -118,11 +119,19 @@ class FileMixin:
         if choice is None:
             return None
         if choice:
-            pdf = filedialog.askopenfilename(parent=self, title="PDF を選ぶ", filetypes=[("PDF", "*.pdf")])
-            if not pdf:
+            pdf = self.ask_other_file("pdf")
+            if pdf is None:
                 return None
-            return self.session.open_vamd(path, Path(pdf))
+            return self.session.open_vamd(path, pdf)
         return self.session.open_vamd(path, False)
+
+    def ask_other_file(self, kind):
+        """相手のファイル（kind が "pdf" なら書式付きファイル、"vamd" なら構文ファイル）が見つからないとき、選んで
+        もらう（開く・［ファイルから読み込む］で共通。選んだ場所は覚えない）。選ばなければ None。"""
+        title, types = (("PDF を選ぶ", [("PDF", "*.pdf")]) if kind == "pdf"
+                        else ("構文ファイルを選ぶ", [("構文ファイル", f"*{vamd.EXTENSION}")]))
+        path = filedialog.askopenfilename(parent=self, title=title, filetypes=types)
+        return Path(path) if path else None
 
     def _confirm_discard(self):
         """保存していない変更があれば、保存するかを尋ねる。続けてよければ True。"""
@@ -171,6 +180,8 @@ class FileMixin:
             return False
         if not self._check_released(text):
             return False
+        if not self._check_missing_images(text):
+            return False
         if self.session.settings.doc_type == naiyou.DOC_TYPE and not self._check_naiyou(text):
             return False
         try:
@@ -214,6 +225,27 @@ class FileMixin:
             self.text.see(first)
             self.text.focus_set()
         return False
+
+    def _check_missing_images(self, text):
+        """画像のデータがない [IMAGE n]（PDF なしで開いた、別の文書から行を写した、AI が作った、など）があれば、
+        エディターのカーソルをその行に動かし、保存するかを尋ねる（既定は保存をやめる。2026-10-29 班長決定）。
+        このまま保存すると、その所は空けたまま（枠は描かない）。保存してよければ True。"""
+        missing = self.session.missing_images(text)
+        if not missing:
+            return True
+        names = "、".join(f"[IMAGE {n}]" for n in missing)
+        for k, line in enumerate(self.raw_text().split("\n")):
+            mark = image_mark(line)
+            if mark and mark[0] == missing[0]:
+                self.text.tag_remove("sel", "1.0", "end")
+                self.text.mark_set("insert", f"{k + 1}.0")
+                self.text.see(f"{k + 1}.0")
+                break
+        return messagebox.askyesno(APP_NAME, f"画像のない画像の記号があります：{names}\n\n"
+                                   "書式付きファイル（PDF）が見つからずに開いた文書や、別の文書から写した行では、画像が"
+                                   "戻りません。このまま保存すると、その所は空けたまま保存します。"
+                                   "画像を入れ直すときは、その行を消して［画像］で入れてください。\n\n"
+                                   "このまま保存しますか？", default=messagebox.NO, parent=self)
 
     def _check_naiyou(self, text):
         """内容証明なら、保存する前に VA内容証明郵便と同じ字数・行数のチェックをする（2026-10-24 班長指示）。

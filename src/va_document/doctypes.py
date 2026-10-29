@@ -7,6 +7,9 @@ from dataclasses import dataclass, replace
 # 番号スタイル（VA公用文の値）→ 字の種類
 _STYLE = {14: "fw", 0: "hw", 20: "kana", 12: "hwkana", 4: "alpha", 2: "roman", 18: "circled"}
 
+MM = 72 / 25.4                  # 1mm のポイント数（余白などは mm で持つ）
+FONT_SIZE = 12                  # 字の大きさ（ポイント。VA公用文 cstSettings.sngFont）
+
 # 表題の配置
 TITLE_CENTER, TITLE_JUSTIFY, TITLE_LEFT = "center", "justify", "left"
 

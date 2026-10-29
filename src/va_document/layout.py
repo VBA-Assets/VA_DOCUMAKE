@@ -2,19 +2,19 @@
 
 規則は仕様.md の6。試作（試作/typeset.py）で、VA公用文の7種類すべての見本と一致を確かめたもの。
 座標はポイント単位で、x は本文の左端から、行はページの中の何行目か（0 から）で表す。
+表と画像（本文の行の格子に合わせない塊）の組み方は layout_blocks.py（2026-10-29 のリファクタリング）。
 """
 import math
 import unicodedata
 from dataclasses import dataclass, field, replace
 
-from .document import BLANK, BULLET, CENTER, FOOTER, HEADER, HEADING, NUMBER, PAGE_BREAK, RIGHT, SECTION_BREAK, TABLE
-from .document import TITLE, TOC, TOC_LEVELS, heading_label, squeezed_numbers
-from .doctypes import (NAIYOU, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED, PAGE_NUMBER_BOTTOM_RIGHT,
+from .document import BLANK, BULLET, CENTER, FOOTER, HEADER, HEADING, IMAGE, NUMBER, PAGE_BREAK, RIGHT, SECTION_BREAK
+from .document import TABLE, TITLE, TOC, TOC_LEVELS, heading_label, squeezed_numbers
+from .doctypes import (FONT_SIZE, MM, NAIYOU, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED, PAGE_NUMBER_BOTTOM_RIGHT,
                        PAGE_NUMBER_TOP_RIGHT, TITLE_CENTER, TITLE_JUSTIFY, TITLE_LEFT)
+from .layout_blocks import BlockMixin
 
-MM = 72 / 25.4
 PAGE_W, PAGE_H = 210 * MM, 297 * MM
-FONT_SIZE = 12
 
 # ページ番号・ヘッダー・フッターの位置
 HEADER_DISTANCE, FOOTER_DISTANCE = 20 * MM, 15 * MM  # VA公用文 basSetup.ConfigPage
@@ -28,18 +28,10 @@ HF_ABOVE = HF_LINE_PITCH - HF_BELOW
 HF_EDGE_MIN = 5 * MM
 _FOOTER_PAGE_NUMBERS = (PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED, PAGE_NUMBER_BOTTOM_RIGHT)
 
-# 表の値（仕様.md の5.3。Word に合わせ込まず、Word の既定に寄せた読みやすい値）
-CELL_PAD_X = 1.9 * MM           # セルの左右の余白（Word の既定 1.9mm）
-CELL_PAD_Y = 1.5                # セルの上下の余白（ポイント）
 # 傍点の黒丸（VAスタイルの傍点の既定「黒丸」と同じ形）：半径と、字の基準線から黒丸の中心までの高さ（ポイント）。
 # 本文の行では行の間に置き、字の位置・改行・改ページは変えない（2026-10-24 班長指示）
 DOT_RADIUS = 0.08 * 12
 DOT_RISE = 1.15 * 12
-# 傍点のある表の行は、上をこれだけ空ける（表の行は字の上の余白が狭く、黒丸が上の罫線に重なるため）
-DOT_ROW_EXTRA = 2.5
-CELL_LINE_PITCH = FONT_SIZE * 1.3  # セルの中の行送り（VA公用文が表に使う「行間詰め」の1行に近い値）
-RULE_WIDTH = 0.5                # 罫線の太さ（ポイント）
-DOUBLE_RULE_GAP = 2.0           # 2重線の2本の間（ポイント。1.5pt では画面で1本に見えた）
 
 # 禁則（Word の「標準」）
 NO_START = set("!%),.:;?]}¢°’”‰′″℃、。々〉》」』】〕゛゜ゝゞ・ヽヾ！％），．：；？］｝｡｣､･ｧｨｩｪｫｬｭｮｯｰﾞﾟ￠")
@@ -92,39 +84,7 @@ class Line:
     y: float = None         # ヘッダー・フッターの行の基準線（用紙の上端から。ポイント）
 
 
-@dataclass
-class TableGlyph:
-    ch: str
-    x: float                # 本文の左端からの位置（ポイント）
-    y: float                # 基準線の、用紙の上端からの位置（ポイント）
-    row: int = -1           # 表の何行目か（0 が見出しの行）
-    col: int = -1           # 何列目か
-    index: int = -1         # セルの何字目か
-    bold: bool = False      # 太字
-    highlight: bool = False  # 蛍光ペン
-    dot: bool = False       # 傍点
-    pseudonym: bool = False  # 仮名化した語の字
-
-
-@dataclass
-class TableRow:
-    top: float              # 行の上の端（用紙の上端から。ポイント）
-    bottom: float           # 行の下の端
-    double_below: bool = False  # この行の下を2重線にするか（見出しの行）
-    index: int = -1             # 表の何行目か（0 が見出しの行）
-
-
-@dataclass
-class TablePiece:
-    """1つのページに入る表の部分（ページをまたぐ表は、ページごとに分かれる）。"""
-    page: int
-    col_x: list             # 列の境目の位置（本文の左端から。左端・各列の右端）
-    para_index: int = -1    # 何番目の段落の表か
-    rows: list = field(default_factory=list)
-    glyphs: list = field(default_factory=list)
-
-
-class Typesetter:
+class Typesetter(BlockMixin):
     def __init__(self, dt, page_number=PAGE_NUMBER_BOTTOM_CENTER, keep=True):
         """dt は文書の種類、page_number はページ番号の位置（ヘッダー・フッターをページ番号の直下・直上に置くため）。
 
@@ -137,6 +97,9 @@ class Typesetter:
         self.page_number_shift = {}     # ページ → ページ番号をずらす量（ヘッダー・フッターが余白に入りきらないとき）
         self.warnings = []              # 利用者に知らせること（ヘッダーが本文に重なるなど）
         self.tables = []                # 組んだ表（TablePiece。layout で作り直す）
+        self.images = []                # 組んだ画像（ImagePiece。layout で作り直す）
+        self.image_sizes = {}           # 画像の番号 → (幅, 高さ)（画素。呼ぶ側が入れる。ない番号は枠にする）
+        self._wrap = None               # 回り込みの範囲 (始めの行, 終わりの行, 右に空ける幅)（通しの行の番号）
         top, bottom, left, right = dt.margins
         chars, lines = dt.chars_lines
         self.margin_top, self.margin_left = top * MM, left * MM
@@ -225,11 +188,12 @@ class Typesetter:
             return (dt.heading_left[x] + add + dt.list_left) * self.pitch, dt.list_first * self.pitch, 0.0
         return (dt.text_left[x] + add) * self.pitch, dt.text_first[x] * self.pitch, 0.0
 
-    def break_lines(self, items, left, first, right, width=None, hang_allowed=True):
+    def break_lines(self, items, left, first, right, width=None, hang_allowed=True, right_extra=None):
         """(字, 送り幅) の列を行に分ける。width は組む幅（省略すると本文の幅。表のセルでは中の幅）。
 
         hang_allowed が False のとき（表のセル）は、句読点をぶら下げず、前の字ごと次の行へ送る
-        （ぶら下げると、セルの右の罫線にかかるため）。
+        （ぶら下げると、セルの右の罫線にかかるため）。right_extra は、段落の k 行目（0 から）の右インデントに足す幅を
+        返す関数（右に置いた画像への回り込み）。
 
         各行は (行頭の x, [(字, 送り幅), ...], ぶら下げ有無, 最終行か, 行末の半角空白の数)。
         """
@@ -239,7 +203,7 @@ class Typesetter:
         n = len(items)
         start_x = left + first
         while i < n:
-            avail = width - right - start_x
+            avail = width - right - start_x - (right_extra(len(lines)) if right_extra else 0.0)
             j = i
             used = 0.0
             while j < n and used + items[j][1] <= avail + 0.01:
@@ -374,6 +338,8 @@ class Typesetter:
         # 最初の階層：見出しを順に読み、より浅い見出しが出たら、そこから基準を変える（VA公用文の xFirst）
         self.first_level = None
         self.tables = []
+        self.images = []
+        self._wrap = None
         self.para_rows = {}     # 段落 → 始まる行（通しの行の番号。空の行・表も含む。確認表示とエディターの連動に使う）
         self.blank_rows = []    # 空の段落の行（通しの行の番号。行番号を数えるのに使う）
         # セクションごとの、始まるページとヘッダー・フッターの段落
@@ -385,6 +351,12 @@ class Typesetter:
             self.para_rows[pi] = row
             if p.area:
                 sections[-1][p.area].append(pi)     # 本文の行は使わない（_layout_areas で組む）
+                continue
+            if p.kind in (TABLE, TOC, IMAGE):
+                row = self._end_wrap(row)           # 回り込みを終え、画像の下の端より後の行から組む
+                self.para_rows[pi] = row
+            if p.kind == IMAGE:
+                row = self.layout_image(p, row, pi)
                 continue
             if p.kind == TABLE:
                 row = self.layout_table(p, row, pi)
@@ -398,6 +370,8 @@ class Typesetter:
             if p.kind in (PAGE_BREAK, SECTION_BREAK):
                 if row % self.lines_page:
                     row += self.lines_page - row % self.lines_page
+                # 次のページへ送った回り込みの画像があれば、その下から（画像が改ページの先のページの上にある）
+                row = self._end_wrap(row)
                 forced_top = row
                 if p.kind == SECTION_BREAK:
                     self.first_level = None
@@ -417,19 +391,20 @@ class Typesetter:
                 continue            # 複合見出し：次の見出しと1行にまとめる
             if self.keep and p.kind == HEADING:
                 # 見出しを、続く見出しと次の本文の1行目と同じページに置く（2026-10-28 班長決定）
-                at, need = row % self.lines_page, self._keep_rows(paras, pi)
+                at, need = row % self.lines_page, self._keep_rows(paras, pi, row)
                 if at and self.lines_page < at + need and need <= self.lines_page:     # 1ページを超えるものは送らない
                     row += self.lines_page - at
                     k = pi
                     while k >= 0 and (k == pi or paras[k].composite):
                         self.para_rows[k] = row
                         k -= 1
-            number, right, broken = self._break_para(paras, pi)
+            number, right, broken = self._break_para(paras, pi, row)
             num_left = len(number)
             offset = len(p.number) - len(number)      # 字の番号は、この見出しの番号の1字目を 0 とする（前の番号は負）
             for start_x, chars, hang, last, trail in broken:
                 num_here = min(num_left, len(chars))
-                placed = self.place_line(p.align, start_x, chars, hang, last, trail, num_here, right)
+                placed = self.place_line(p.align, start_x, chars, hang, last, trail, num_here,
+                                         right + self._wrap_extra(row))
                 glyphs = [Glyph(ch, x, k < num_here, offset + k) for k, (ch, x) in enumerate(placed)]
                 self.place_number_glyphs(glyphs[:num_here], chars)
                 out.append(Line(row // self.lines_page + 1, row % self.lines_page, glyphs, pi))
@@ -439,8 +414,9 @@ class Typesetter:
         self._layout_areas(paras, out, sections)
         return out
 
-    def _break_para(self, paras, pi):
-        """見出し・本文の段落を行に分ける。(番号〔複合見出しはまとめた番号〕, 右インデント, break_lines の行) を返す。"""
+    def _break_para(self, paras, pi, row=None):
+        """見出し・本文の段落を行に分ける。(番号〔複合見出しはまとめた番号〕, 右インデント, break_lines の行) を返す。
+        row（段落の始まる通しの行）があれば、回り込みの範囲の行を狭めて分ける。"""
         p = paras[pi]
         number, merged, outer, squeeze = p.number, 0, p, ()
         if p.kind == HEADING:
@@ -454,12 +430,15 @@ class Typesetter:
                                 self.text_w - right - left - max(first, 0.0))
         for a, b in squeeze:
             items[a:b] = self.squeeze_items(number[a:b])
-        return number, right, self.break_lines(items, left, first, right)
+        extra = (lambda k: self._wrap_extra(row + k)) if row is not None and self._wrap else None
+        return number, right, self.break_lines(items, left, first, right, right_extra=extra)
 
-    def _keep_rows(self, paras, pi):
+    def _keep_rows(self, paras, pi, row=None):
         """見出し（pi）を、続く見出しと次の本文の1行目と同じページに置くのに要る行数（2026-10-28 班長決定）。
 
         見出しの行（折り返した行も）、間の空行、続く見出し（下位の見出しも）を数え、最初の本文の1行目までとする。
+        見出しの行は、row（見出しの始まる行）から数えて回り込みの範囲にあれば、狭めて分けた行数で数える。
+        次が画像なら、画像の高さの行数（回り込ませる画像も、塊として数える）。
         次が表なら、1ページに収まる表は表全体、収まらない表は見出しの行と最初の行まで。改ページ・セクション区切り・
         文書の終わりが先に来たら、見出しの行だけ。続く見出しまで入れると1ページを超えるときは、この見出しと
         次の段落の1行目だけにする（見出しだけの文書でも、なるべく分けないため）。それでも1ページを超えるものは、
@@ -473,13 +452,15 @@ class Typesetter:
                     continue
                 if p.kind in (PAGE_BREAK, SECTION_BREAK):
                     break
-                if p.kind == BLANK or (p.kind not in (TABLE, TOC) and not (p.number or p.text)):
+                if p.kind == BLANK or (p.kind not in (TABLE, TOC, IMAGE) and not (p.number or p.text)):
                     pending += 1
                     continue
                 if p.kind == HEADING:
                     if self.first_level is None or p.level < self.first_level:
                         self.first_level = p.level
-                    n = len(self._break_para(paras, k)[2])
+                    n = len(self._break_para(paras, k, None if row is None else row + rows + pending)[2])
+                elif p.kind == IMAGE:
+                    n = self.image_rows(self.image_size(p)[2])
                 elif p.kind == TABLE:
                     n = -(-(self.table_keep_height(self.table_rows(p)[1]) - 0.01) // self.line_pitch)
                 else:
@@ -647,15 +628,6 @@ class Typesetter:
         last = math.floor((self.margin_left + end) / step + 1e-9) - 1
         return [Glyph(".", k * step - self.margin_left, True, -1) for k in range(first, last + 1)]
 
-    # ---------- 表（仕様.md の5.3） ----------
-
-    def table_left(self, p):
-        """表の左端（本文の左端から）。直前の見出しに属する本文の左インデント（本文の2行目以降の位置）。"""
-        if not p.body_level or self.first_level is None:
-            return 0.0
-        x = p.body_level - 1
-        return (self.dt.text_left[x] + self.dt.left_add * (p.body_level - self.first_level)) * self.pitch
-
     def longest_unbreakable(self, text, spans=(), limit=None):
         """折り返せない最も長い字の並び（英数字の語・行頭禁則でつながる字・均等割付の字など）の幅。"""
         items = self.make_items(text, spans, limit)
@@ -666,146 +638,6 @@ class Typesetter:
             cur += w
             best = max(best, cur)
         return best
-
-    def column_widths(self, table, width):
-        """列の幅。表の幅を width（本文の右端まで）にする（ブラウザの表の列の幅と同じ考え方）。
-
-        各列の「最小の幅」は折り返せない最も長い字の並びが収まる幅、「最大の幅」は折り返さずに収まる幅。
-        全体が収まるときは、最大の幅に比べて余りを足す。収まらないときは、短い列から順に、最大の幅が
-        「残りの幅を残りの列で等分した幅」以下の列に最大の幅を与え（折り返さない）、残った幅を長い列に、
-        最大の幅に比べて配る（長い説明の列だけが折り返す）。長い列も最小の幅より狭くはしない。
-        """
-        rows = [table.header] + table.rows
-        n = len(table.header)
-        pad = 2 * CELL_PAD_X
-        floor = self.pitch + pad
-        spans = table.distribute
-        limit = width - pad         # 割り付ける幅は、表の幅より広くしない
-        maxw = [max(max(sum(w for _, w in self.make_items(r[k][1], spans.get((ri, k), ()), limit))
-                        for ri, r in enumerate(rows)) + pad, floor) for k in range(n)]
-        minw = [max(max(self.longest_unbreakable(r[k][1], spans.get((ri, k), ()), limit)
-                        for ri, r in enumerate(rows)) + pad, floor) for k in range(n)]
-        if sum(maxw) <= width:
-            total = sum(maxw)
-            return [w + (width - total) * w / total for w in maxw]
-        if sum(minw) >= width:
-            # 最小の幅も収まらないときは、最小の幅に比べて縮める（語の途中で折り返す）
-            total = sum(minw)
-            return [w * width / total for w in minw]
-        widths = [None] * n
-        rest, open_cols = width, list(range(n))
-        changed = True
-        while changed and open_cols:
-            changed = False
-            share = rest / len(open_cols)
-            for k in sorted(open_cols, key=lambda k: maxw[k]):
-                if maxw[k] <= share:
-                    widths[k] = maxw[k]
-                    rest -= maxw[k]
-                    open_cols.remove(k)
-                    changed = True
-                    break
-        # 残りの長い列に、最大の幅に比べて配る（最小の幅は確保する）
-        total = sum(maxw[k] for k in open_cols)
-        for k in open_cols:
-            widths[k] = maxw[k] * rest / total
-        short = [k for k in open_cols if widths[k] < minw[k]]
-        if short:
-            fixed = sum(minw[k] for k in short)
-            others = [k for k in open_cols if k not in short]
-            total = sum(maxw[k] for k in others)
-            for k in short:
-                widths[k] = minw[k]
-            for k in others:
-                widths[k] = maxw[k] * (rest - fixed) / total
-        return widths
-
-    def layout_cell(self, align, text, width, spans=()):
-        """セルの中を組み、[(行の番号, [(字, x)])] を返す。x はセルの中の左端から。spans は均等割付の範囲。"""
-        inner = width - 2 * CELL_PAD_X
-        items = self.make_items(text, spans, inner)
-        out = []
-        if not items:
-            return out
-        cell_align = {"left": "justify", CENTER: CENTER, RIGHT: RIGHT}.get(align, "justify")
-        for k, (start_x, chars, hang, last, trail) in enumerate(self.break_lines(items, 0, 0, 0, inner, False)):
-            out.append((k, self.place_line(cell_align, start_x, chars, hang, last, trail, 0, 0, inner)))
-        return out
-
-    def table_rows(self, p):
-        """表の (列の幅, [(セルごとの組んだ行, 傍点の分の空き, 行の高さ)]）。0 番目が見出しの行。"""
-        t = p.table
-        widths = self.column_widths(t, self.text_w - self.table_left(p))
-        out = []
-        for ri, cells in enumerate([t.header] + t.rows):
-            laid = [self.layout_cell(a, s, widths[k], t.distribute.get((ri, k), ())) for k, (a, s) in enumerate(cells)]
-            n_lines = max([len(c) for c in laid] + [1])
-            extra = DOT_ROW_EXTRA if any((ri, k) in t.dots for k in range(len(cells))) else 0
-            height = (n_lines * CELL_LINE_PITCH + 2 * CELL_PAD_Y + extra
-                      + (DOUBLE_RULE_GAP if ri == 0 and t.double_rule else 0))
-            out.append((laid, extra, height))
-        return widths, out
-
-    def table_keep_height(self, rows):
-        """表の書き出しで、同じページに入れる高さ。1ページに収まる表は表全体、収まらない表は見出しの行と最初の行
-        （2026-10-28 班長決定）。"""
-        total = sum(h for _, _, h in rows)
-        if total <= self.lines_page * self.line_pitch + 0.01:
-            return total
-        return sum(h for _, _, h in rows[:2])
-
-    def layout_table(self, p, row, para_index=-1):
-        """表を組んで self.tables に入れ、表の次の本文が始まる行（通しの行の番号）を返す。
-
-        表は格子に合わせず、行の高さはセルの中の行数で決める。1ページに収まる表は途中で分けず、ページの下に
-        入りきらなければ表ごと次のページへ送る。収まらない表は、ページの下に入りきらない行を次のページへ送り、
-        次のページの先頭で見出しの行を繰り返す（Word の「タイトル行の繰り返し」。2026-10-28 班長決定）。
-        表の次の本文は、表の下の端より後の、最初の格子の行から始める。
-        """
-        t = p.table
-        widths, rows = self.table_rows(p)
-        col_x = [self.table_left(p)]
-        for w in widths:
-            col_x.append(col_x[-1] + w)
-        page_top = self.margin_top
-        page_bottom = self.margin_top + self.lines_page * self.line_pitch
-        page = row // self.lines_page + 1
-        y = page_top + (row % self.lines_page) * self.line_pitch
-        if self.keep and y > page_top + 0.01 and y + self.table_keep_height(rows) > page_bottom + 0.01:
-            page += 1
-            y = page_top
-        piece = TablePiece(page, col_x, para_index=para_index)
-        self.tables.append(piece)
-
-        def put(ri, y):
-            laid, extra, height = rows[ri]
-            piece.rows.append(TableRow(y, y + height, ri == 0 and t.double_rule, ri))
-            for k, lines in enumerate(laid):
-                ci = 0
-                for li, placed in lines:
-                    base = (y + CELL_PAD_Y + extra + li * CELL_LINE_PITCH + (CELL_LINE_PITCH - FONT_SIZE) / 2
-                            + FONT_SIZE * 220 / 256)
-                    for ch, x in placed:
-                        piece.glyphs.append(TableGlyph(ch, col_x[k] + CELL_PAD_X + x, base, ri, k, ci))
-                        ci += 1
-            return y + height
-
-        for ri, (_, _, height) in enumerate(rows):
-            if y + height > page_bottom + 0.01 and y > page_top + 0.01:
-                # 次のページへ送る（ページの上から始まる行は、入りきらなくても送らない）
-                page += 1
-                y = page_top
-                if piece.rows:
-                    piece = TablePiece(page, col_x, para_index=para_index)
-                    self.tables.append(piece)
-                    if self.keep and ri > 0:
-                        y = put(0, y)       # 見出しの行を繰り返す
-                else:
-                    piece.page = page
-            y = put(ri, y)
-        # 表の次の本文は、表の下の端より後の、最初の格子の行から
-        rows_used = -(-(y - page_top - 0.01) // self.line_pitch)
-        return (page - 1) * self.lines_page + int(rows_used)
 
     def baseline(self, row):
         """その行の字の基準線の、用紙の上端からの位置（ポイント）。

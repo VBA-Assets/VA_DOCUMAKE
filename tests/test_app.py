@@ -96,11 +96,11 @@ def test_editor_is_always_pseudonymized(window, monkeypatch):
     window.refresh()
     assert window.raw_text().endswith("〔人名Ａ〕は認める。")
     # 仮名化した語を含む文章を貼ると、記号に置き換えて貼る（そのほかの文章は、ふつうの貼り付けに任せる）
-    monkeypatch.setattr(window, "clipboard_get", lambda: "甲野太郎の陳述書と〔人名Ｚ〕の陳述書")
+    monkeypatch.setattr(window, "clipboard_text", lambda: "甲野太郎の陳述書と〔人名Ｚ〕の陳述書")
     window.text.mark_set("insert", "end")
     assert window._on_paste() == "break"
     assert window.raw_text().endswith("〔人名Ａ〕の陳述書と〔人名Ｚ〕の陳述書")
-    monkeypatch.setattr(window, "clipboard_get", lambda: "ふつうの文章")
+    monkeypatch.setattr(window, "clipboard_text", lambda: "ふつうの文章")
     assert window._on_paste() is None
     # 選んだ語を仮名化すると、エディターの同じ語がすべて記号になる
     window._load_text(TEXT + "乙山花子と乙山花子。\n")
@@ -155,7 +155,7 @@ def test_save_and_import(window, tmp_path, monkeypatch):
     # （班長のクリップボードを書き換えないよう、クリップボードの読み取りを差し替える）
     body = vamd.read_file(window.session.vamd_path).body_text.replace("争う。", "否認する。")
     answer = "直しました。\n```\n" + vamd.separator_line(window.session.doc_id, 1, window.session.settings) + "\n" + body + "\n```\n"
-    monkeypatch.setattr(window, "clipboard_get", lambda: answer)
+    monkeypatch.setattr(window, "clipboard_text", lambda: answer)
     window.on_import()
     assert "〔人名Ａ〕の主張は否認する。" in window.raw_text()          # エディターは仮名のまま
     assert "甲野太郎の主張は否認する。" in window.real_text()
@@ -222,9 +222,9 @@ def test_paste_rejects_other_document_and_plain_text(window, tmp_path, monkeypat
     shown = []
     monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: shown.append(("error", a[1])))
     monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: shown.append(("info", a[1])))
-    monkeypatch.setattr(window, "clipboard_get", lambda: "ふつうの文章")
+    monkeypatch.setattr(window, "clipboard_text", lambda: "ふつうの文章")
     window.on_import()
-    monkeypatch.setattr(window, "clipboard_get",
+    monkeypatch.setattr(window, "clipboard_text",
                         lambda: "==== VA Document 文書ID ZZZZZZZZ 版 1 ====\n# 認否\n認める。")
     window.on_import()
     assert [k for k, _ in shown] == ["info", "error"] and "別の文書" in shown[1][1]
@@ -237,7 +237,7 @@ def test_paste_warns_about_removed_paragraphs_and_tokens(window, tmp_path, monke
     warned = []
     monkeypatch.setattr(messagebox, "showwarning", lambda *a, **k: warned.append(a[1]))
     sep = vamd.separator_line(window.session.doc_id, 1, window.session.settings)
-    monkeypatch.setattr(window, "clipboard_get", lambda: sep + "\n原告　〔人名Ａ〕\n:=: 準備書面（１）\n# 認否\n")
+    monkeypatch.setattr(window, "clipboard_text", lambda: sep + "\n原告　〔人名Ａ〕\n:=: 準備書面（１）\n# 認否\n")
     window.on_import()
     assert len(warned) == 1 and "消えた段落（1）" in warned[0] and "甲野太郎の主張は争う。" in warned[0]
 
@@ -248,7 +248,7 @@ def test_paste_drops_ai_marker_lines(window, tmp_path, monkeypatch):
     assert window.on_save()
     body = window.raw_text().rstrip("\n")
     sep = vamd.separator_line(window.session.doc_id, 1, window.session.settings)
-    monkeypatch.setattr(window, "clipboard_get", lambda: sep + "\n" + body + "\n<?thinking_complete?>\n")
+    monkeypatch.setattr(window, "clipboard_text", lambda: sep + "\n" + body + "\n<?thinking_complete?>\n")
     window.on_import()
     assert "<?thinking_complete?>" not in window.raw_text()
     assert "AI の内部の目印と思われる行 1 行（<?thinking_complete?>）を除きました" in window.status.cget("text")
@@ -1802,7 +1802,7 @@ def test_copy_vamd_saves_first_and_tells(window, tmp_path, monkeypatch):
     window.on_copy_vamd()
     assert window.session.version == 1
     assert window.status.cget("text").startswith("版 1 を保存し、AI に渡す構文ファイル")
-    assert window.clipboard_get() == window.session.vamd_path.read_text(encoding="utf-8")
+    assert window.clipboard_text() == window.session.vamd_path.read_text(encoding="utf-8")
     window.on_copy_vamd()                    # 保存していない変更がなければ、保存しない
     assert window.session.version == 1 and window.status.cget("text").startswith("AI に渡す構文ファイル")
 
@@ -1815,7 +1815,7 @@ def test_copy_vamd_path(window, tmp_path):
     assert str(window.copy_path_button.cget("state")) == "normal"
     window.clipboard_clear()
     window.copy_path_button.invoke()
-    assert window.clipboard_get() == str(window.session.vamd_path) and window.session.vamd_path.is_absolute()
+    assert window.clipboard_text() == str(window.session.vamd_path) and window.session.vamd_path.is_absolute()
     assert "パスをコピーしました" in str(window.status.cget("text"))
 
 
@@ -1946,3 +1946,173 @@ def test_edit_dialog_unregisters(window, monkeypatch):
     window.on_edit_entry()
     assert "〔人名Ａ〕" not in window.raw_text() and window.raw_text() == window.real_text() == TEXT
     assert window.tree.get_children() == () and "仮名化を解除しました" in str(window.status.cget("text"))
+
+
+# ---------- 画像（[IMAGE 1]{30}。2026-10-29 班長決定） ----------
+
+def _picture(size=(400, 300)):
+    import io
+    from PIL import Image
+    from va_document import images
+    buf = io.BytesIO()
+    Image.new("RGB", size, (30, 90, 160)).save(buf, "PNG")
+    return images.from_bytes(buf.getvalue())
+
+
+def test_image_button_inserts_line_and_undo(window, tmp_path, monkeypatch):
+    """［画像］で画像ファイルを選ぶと、カーソルの行の次に [IMAGE n]{幅} の行が入り、確認表示に画像が出る。
+    Ctrl+Z 1回で戻る。画像として読めないファイルは知らせる。"""
+    from tkinter import ttk
+    from va_document import image_ops
+    assert "画像" in {str(b.cget("text")) for b in _widgets(window, ttk.Button)}
+    good = tmp_path / "現場.png"
+    good.write_bytes(__import__("base64").b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAEElEQVR4nGP4z8DAwMDAAAAN+gH/4oXbOAAAAABJRU5ErkJggg=="))
+    bad = tmp_path / "メモ.txt"
+    bad.write_text("画像ではない", encoding="utf-8")
+    errors = []
+    monkeypatch.setattr(image_ops.filedialog, "askopenfilenames", lambda **k: (str(good), str(bad)))
+    monkeypatch.setattr(image_ops.messagebox, "showerror", lambda *a, **k: errors.append(a[1]))
+    window.text.mark_set("insert", "2.0")
+    window.on_image()
+    lines = window.raw_text().split("\n")
+    assert lines[2] == "[IMAGE 1]{1}" and len(errors) == 1 and "読めない" in errors[0]
+    assert window.session.images[1].size == (2, 1)
+    assert [p.number for p in window.session.layout_map.ts.images] == [1]
+    assert str(good) not in json.dumps(window.cfg.__dict__, ensure_ascii=False, default=str)   # 場所を覚えない
+    window.text.edit_undo()
+    assert "[IMAGE" not in window.raw_text()
+
+
+def test_paste_image_from_clipboard(window, monkeypatch):
+    """Ctrl+V：クリップボードに字がなく画像だけがあれば画像を入れる（Win+V で選んだ画像も、ここを通る）。字があれば
+    （Excel・Word からのコピーは字と画像の両方）、今までどおり字を貼る。"""
+    from va_document import image_ops
+    calls = []
+    monkeypatch.setattr(window, "clipboard_text", lambda: None)
+    monkeypatch.setattr(image_ops.images, "from_clipboard", lambda: calls.append(1) or [_picture(), _picture()])
+    window.text.mark_set("insert", "end")
+    assert window._on_paste() == "break"
+    assert window.raw_text().rstrip("\n").split("\n")[-2:] == ["[IMAGE 1]{25}", "[IMAGE 2]{25}"]
+    window.text.edit_undo()                                   # 2つとも Ctrl+Z 1回で戻る
+    assert "[IMAGE" not in window.raw_text()
+    monkeypatch.setattr(window, "clipboard_text", lambda: "ふつうの文章")
+    assert window._on_paste() is None and len(calls) == 1
+    monkeypatch.setattr(window, "clipboard_text", lambda: None)
+    monkeypatch.setattr(image_ops.images, "from_clipboard", lambda: [])
+    assert window._on_paste() is None
+
+
+def test_save_asks_when_image_data_is_missing(window, tmp_path, monkeypatch):
+    """画像のデータがない [IMAGE n] があれば、カーソルをその行に動かし、保存するかを尋ねる（既定は保存しない）。"""
+    window.text.insert("end", "[IMAGE 5]{10}\n")
+    window.session.pdf_path = tmp_path / "準備書面.pdf"
+    asked = []
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append((a[1], k.get("default"))) or False)
+    assert not window.on_save() and window.session.version == 0
+    assert "[IMAGE 5]" in asked[0][0] and asked[0][1] == messagebox.NO
+    assert window.text.index("insert").startswith("5.")
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+    assert window.on_save() and window.session.version == 1
+
+
+def test_image_preview_links_to_editor(window):
+    """確認表示の画像を押すと、エディターの画像の行へ。エディターの画像の行は、確認表示の画像の位置。"""
+    n = window.session.add_picture(_picture(), window.raw_text())
+    window.text.insert("end", f":-: [IMAGE {n}]{{20}}\n")
+    window.refresh()
+    m = window.session.layout_map
+    piece = m.ts.images[0]
+    line = len(window.raw_text().split("\n")) - 2
+    assert m.hit(piece.page - 1, m.ts.margin_left + piece.x + piece.w / 2, piece.y + piece.h / 2) == (line, 4)
+    assert m.locate(line, 4) == (piece.page - 1, m.ts.margin_left + piece.x, piece.y, piece.h)
+    assert window._preview_doc[0].get_images()
+    # ［右］で右に置き、もう一度押すと標準に戻す（配置のボタンは画像の行にも効く）
+    window.text.mark_set("insert", f"{line + 1}.0")
+    window.on_align(RIGHT_MARK)
+    assert window.text.get(f"{line + 1}.0", f"{line + 1}.end") == f"--: [IMAGE {n}]{{20}}"
+    window.refresh()
+    im = window.session.layout_map.ts.images[0]
+    assert im.wrap and window._preview_doc[0].get_images()          # 回り込ませる画像は、後に本文がなくても描く
+
+
+# ---------- ［ファイルから読み込む］（2026-10-29 班長決定） ----------
+
+def _first_document(window, tmp_path):
+    """同じ案件の前の文書（甲野太郎＝〔人名Ａ〕、乙山商事株式会社＝〔法人Ｘ〕）を保存する。"""
+    s = app.Session(window.cfg)
+    s.dictionary.register("甲野太郎", "人名", "Ａ")
+    s.dictionary.register("乙山商事株式会社", "法人", "Ｘ")
+    pdf = tmp_path / "事件" / "訴状.pdf"
+    pdf.parent.mkdir()
+    s.save("原告　甲野太郎\n被告　乙山商事株式会社\n", pdf)
+    return pdf
+
+
+def test_load_entries_from_file(window, tmp_path, monkeypatch):
+    """「仮名化した語（ダブルクリックで編集）」の右の［ファイルから読み込む］で、同じ案件の文書の仮名化した語を、確認の画面で
+    確かめてから今の一覧に足す。エディターの読み込んだ語は記号になり、PDF の字は変わらない。選んだ場所は覚えない。"""
+    from tkinter import ttk
+    from va_document.dialogs import LoadEntriesDialog
+    note = next(c for c in _widgets(window, ttk.Label) if str(c.cget("text")) == "（ダブルクリックで編集）")
+    button = next(c for c in _widgets(window, ttk.Button) if str(c.cget("text")) == "ファイルから読み込む")
+    assert button.master == note.master and button.winfo_x() >= note.winfo_x()
+    pdf = _first_document(window, tmp_path)
+    folders = list(window.cfg.pdf_folders)
+    monkeypatch.setattr(ai_ops.filedialog, "askopenfilename", lambda **k: str(pdf))
+    window.text.insert("end", "乙山商事株式会社の主張は争う。\n")
+    window.refresh()
+    real = window.real_text()
+    # ［やめる］なら何も変わらない
+    monkeypatch.setattr(ai_ops, "LoadEntriesDialog", lambda parent, loaded: type("D", (), {"ok": False})())
+    window.on_load_entries()
+    assert set(window.session.dictionary.entries) == {"甲野太郎"} and "乙山商事株式会社の" in window.raw_text()
+    # ［読み込む］（本物の確認の画面で押す）
+    monkeypatch.setattr(ai_ops, "LoadEntriesDialog", LoadEntriesDialog)
+    seen = {}
+
+    def press():
+        dlg = [c for c in window.winfo_children() if isinstance(c, LoadEntriesDialog)][-1]
+        seen["text"] = " ".join(str(c.cget("text")) for c in _widgets(dlg, ttk.Label))
+        dlg.accept()
+    window.after(200, press)
+    window.on_load_entries()
+    assert "訴状.pdf" in seen["text"] and "1 語読み込みます" in seen["text"] and "同じ語・同じ記号" in seen["text"]
+    assert window.session.dictionary.find("〔法人Ｘ〕").word == "乙山商事株式会社"
+    assert "〔法人Ｘ〕の主張は争う。" in window.raw_text() and window.real_text() == real    # PDF の字は変わらない
+    assert window.tree.exists("〔法人Ｘ〕") and "1 語読み込みました" in str(window.status.cget("text"))
+    assert window.cfg.pdf_folders == folders
+
+
+def test_load_entries_conflict_loads_nothing(window, tmp_path, monkeypatch):
+    """この文書の一覧と食い違う語があれば、何も読み込まずに知らせる。"""
+    pdf = _first_document(window, tmp_path)
+    window.session.dictionary.register("乙山商事株式会社", "法人", "Ｂ")
+    shown = []
+    monkeypatch.setattr(ai_ops.filedialog, "askopenfilename", lambda **k: str(pdf))
+    monkeypatch.setattr(messagebox, "showwarning", lambda *a, **k: shown.append(a[1]))
+    monkeypatch.setattr(ai_ops, "LoadEntriesDialog", lambda *a: pytest.fail("確認の画面を出さない"))
+    window.on_load_entries()
+    assert shown and "食い違う" in shown[0] and "〔法人Ｂ〕" in shown[0]
+    assert set(window.session.dictionary.entries) == {"甲野太郎", "乙山商事株式会社"}
+
+
+def test_load_entries_asks_for_missing_pdf(window, tmp_path, monkeypatch):
+    """構文ファイルを選び、PDF が保存したフォルダに見つからないときは、PDF を選ぶかを尋ね、選んだ PDF で読み込む
+    （相手のファイルを選んでもらう画面は、開くときと共通の ask_other_file）。"""
+    pdf = _first_document(window, tmp_path)
+    moved = tmp_path / "別の場所" / "訴状.pdf"
+    moved.parent.mkdir()
+    pdf.rename(moved)
+    vamd_path = next(Path(window.cfg.vamd_folder).glob("*.vamd"))
+    asked, picked = [], []
+
+    def pick(**k):                  # ai_ops と file_ops は同じ tkinter.filedialog を使うので、画面の題で分ける
+        picked.append(k["title"])
+        return str(moved) if k["title"] == "PDF を選ぶ" else str(vamd_path)
+    monkeypatch.setattr(file_ops.filedialog, "askopenfilename", pick)
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(a[1]) or True)
+    monkeypatch.setattr(ai_ops, "LoadEntriesDialog", lambda parent, loaded: type("D", (), {"ok": True})())
+    window.on_load_entries()
+    assert asked and "PDF を選びますか" in asked[0] and picked == ["仮名化した語を読み込むファイル", "PDF を選ぶ"]
+    assert window.session.dictionary.find("〔法人Ｘ〕").word == "乙山商事株式会社"

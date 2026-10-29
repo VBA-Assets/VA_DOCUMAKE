@@ -199,8 +199,42 @@ def _split_blocks(body: str) -> list[list[str]]:
     return blocks
 
 
+def _split_row(line: str) -> list[str]:
+    """表の1行をセルに分ける。`code` の中の「|」と「\\|」は区切りにせず、字として残す
+    （更新履歴の「`|:--|--:|`」で、列が増えて表が崩れたため）。"""
+    cells: list[str] = []
+    cur: list[str] = []
+    in_code = False
+    s = line.strip()
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "\\" and s[i + 1:i + 2] == "|":
+            cur.append("|")
+            i += 2
+            continue
+        if ch == "`":
+            in_code = not in_code
+        elif ch == "|" and not in_code:
+            cells.append("".join(cur).strip())
+            cur = []
+            i += 1
+            continue
+        cur.append(ch)
+        i += 1
+    cells.append("".join(cur).strip())
+    if s.startswith("|"):
+        cells = cells[1:]
+    if s.endswith("|") and not s.endswith("\\|"):
+        cells = cells[:-1]
+    return cells
+
+
 def _table_flowable(lines: list[str], styles: dict[str, ParagraphStyle]) -> Table:
-    rows = [[c.strip() for c in ln.strip().strip("|").split("|")] for ln in lines]
+    rows = [_split_row(ln) for ln in lines]
+    for ln, r in zip(lines, rows):
+        if len(r) != len(rows[0]):
+            raise ValueError(f"表の列の数が見出しの行（{len(rows[0])}列）と違う（{len(r)}列）：{ln[:60]}")
     header, data = rows[0], rows[2:]          # 2行目（---|---）は区切り
     table_data = [[Paragraph(_inline(c), styles["cellhead"]) for c in header]]
     for r in data:

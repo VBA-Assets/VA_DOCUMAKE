@@ -50,6 +50,12 @@
 ・均等割付：`[原告]{5}`（同じ行の中で、角かっこで挟んだ字。波かっこに字数〔全角。0〜99。全角の数字でもよい〕を書く。
   2026-10-24 班長指示。Pandoc の [字]{属性} と同じ形。2026-10-25 班長決定）。挟まれた字を、
   1字目を左端、最後の字を字数の右端に置いて、字の間を均等に空ける（Word の均等割り付けと同じ）。表のセルでも使える。
+・画像：`[IMAGE 1]{30}`（その行だけ。行頭の配置の記号の後ろでもよい）。1 は画像の番号（1〜999）、30 は幅の字数（1〜99。
+  均等割付と同じ読み方で「画像1 を30字の幅に」。省くと置ける幅いっぱい）。画像のデータは構文ファイルに書かず、PDF の中に
+  だけ持つ（2026-10-29 班長決定。検討_画像の挿入.md）。`:-: ` は中央、`--: ` は右に置いて続く本文を左側に回り込ませる。記号の
+  ないものは表と同じく本文の左インデントにそろえる。大文字・小文字は問わない。同じ行に字があるもの、ヘッダー・フッターの
+  行のものは画像とせず、字として読む（均等割付の字になる）。見出しの番号・「最初の見出しを過ぎたか」「右揃えの段落を
+  過ぎたか」は変えない。組み方は layout.py。
 ・空の行：Word（VA公用文）の空の段落と同じく、1行分あける（2026-10-23 班長決定。もとは空の行を段落の区切りとして
   読み飛ばし、1行あけるには `{空行}` を書いていたが、VA公用文との互換のため改めた）。
 ・中身のない配置の行（`--:` だけの行など）も、Word と同じく1行分あける。右揃えなら、そこから先は変換しない。
@@ -75,6 +81,7 @@ from .doctypes import number_text
 HEADING, BODY, BULLET, NUMBER = "heading", "body", "bullet", "number"
 PAGE_BREAK, SECTION_BREAK, BLANK, TABLE = "pagebreak", "section", "blank", "table"
 TOC = "toc"                 # 目次（[TOC] だけの行）
+IMAGE = "image"             # 画像（[IMAGE 1]{30} の行）
 # 配置
 JUSTIFY, CENTER, RIGHT, TITLE = "justify", "center", "right", "title"
 
@@ -95,6 +102,9 @@ TOC_LEVELS = 3              # 目次に載せる見出しの段の既定（Word 
 _TOC_RE = re.compile(r"\[(?i:toc)(?:[:：]([1-9１-９]))?\]")
 TOC_MARK = "[TOC:3]"        # ［目次］で入れる記号
 # 見出しの記号。字のない見出し（「#」だけの行。複合見出しの外側の段）も含む
+# 画像（[IMAGE 1]{30}。2026-10-29 班長決定）。group(1) が番号、group(2) が幅の字数（省いたら None）。半角だけを記号とする
+IMAGE_RE = re.compile(r"\[(?i:image) ([1-9][0-9]{0,2})\](?:\{([1-9][0-9]?)\})?")
+IMAGE_MAX = 999
 HEADING_MARK_RE = re.compile(r"(#{1,9})(?: |[ 　]*$)")
 _NUMBERED_RE = re.compile(r"(\d+)\. ")
 LIST_MARK_RE = re.compile(r"- |\d+\. ")       # 箇条書き・段落番号の記号
@@ -335,6 +345,7 @@ class Para:
     composite: bool = False         # 字のない見出しで、次の見出しと1行にまとめるもの（複合見出しの外側の段）
     area: str = None                # ヘッダー・フッターの段落なら HEADER・FOOTER（本文の行を使わない）
     one_width: bool = False         # 見出し番号を全角1字の幅に縮める文書の見出しか（doctypes.one_width_type）
+    image: tuple = None             # 画像の段落なら (番号, 幅の字数〔省いたら None〕)
 
     def text_index(self, col):
         """元の行の col 字目 → 本文の何字目か。"""
@@ -504,6 +515,21 @@ def split_lead_marks(line):
             return LeadMarks(align, left, rest, area)
 
 
+def image_mark(line):
+    """画像の行（[IMAGE 1]{30}。行頭の配置の記号・->N の後ろでもよい）なら (番号, 幅の字数〔省いたら None〕)、
+    そうでなければ None。ヘッダー・フッターの行は画像としない（parse と同じ）。"""
+    lead = split_lead_marks(split_leading_space(line)[0])
+    if lead.area:
+        return None
+    m = IMAGE_RE.fullmatch(split_leading_space(lead.rest)[0].rstrip())
+    return (int(m.group(1)), int(m.group(2)) if m.group(2) else None) if m else None
+
+
+def image_numbers(lines):
+    """文章（行のリスト）の画像の番号を、出てくる順に（同じ番号も重ねて）返す。"""
+    return [n[0] for n in map(image_mark, lines) if n]
+
+
 def split_leading_space(line):
     """行頭の空白を取り除き、(残りの文字列, インデントの字数) を返す。"""
     n = 0.0
@@ -557,6 +583,13 @@ def parse(lines, dt):
         area = area_of(lead.area)
         line, more = split_leading_space(line)      # 記号・太字の記号の後ろの空白も字下げ（`->2 　本文`。2026-10-28）
         indent += more
+        m_image = None if area else IMAGE_RE.fullmatch(line.rstrip())
+        if m_image:
+            # 画像：見出しの番号・「最初の見出しを過ぎたか」「右揃えの段落を過ぎたか」は変えない
+            paras.append(Para("", kind=IMAGE, image=(int(m_image.group(1)), int(m_image.group(2) or 0) or None),
+                              align=align, left_indent=left_indent, body_level=current if seen and not stopped else 0,
+                              src_line=src, src_col=len(lines[src]) - len(line)))
+            continue
         if not stopped and left_indent is None and area is None:      # ->N の段落は、見出しなどに変換しない
             m_head = HEADING_MARK_RE.match(line)
             m_num = _NUMBERED_RE.match(line)

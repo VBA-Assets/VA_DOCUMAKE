@@ -3,12 +3,13 @@
 
 メインの画面（app.MainWindow）の部品（mixin）。保存（on_save）は file_ops.FileMixin が持つ。
 """
-import tkinter as tk
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 from . import APP_NAME, vamd
-from .dialogs import UNREGISTER, ChangedOutsideDialog, EditDialog, RegisterDialog
+from .dialogs import UNREGISTER, ChangedOutsideDialog, EditDialog, LoadEntriesDialog, RegisterDialog
 from .pseudonym import KINDS, NotRegistrable, trim_selection
+from .recover import PdfMismatch
+from .session import OtherFileMissing
 
 
 class AiMixin:
@@ -96,6 +97,56 @@ class AiMixin:
             changes.append(f"元の語を「{old_word}」から「{e.word}」に")
         self.status.configure(text=("、".join(changes) + "変えました。") if changes else "変えていません。")
 
+    def on_load_entries(self):
+        """［ファイルから読み込む］：同じ案件の書式付きファイル（PDF）か構文ファイルを選び、その文書の仮名化した語を、今の
+        一覧に足す（2026-10-29 班長決定。検討_仮名化した語の読み込み.md）。対応表は、開き直すときと同じく PDF と構文ファイルを
+        突き合わせてメモリの中で作り直す（クリップボード・ファイルに出さない）。食い違いが1つでもあれば何も読み込まず、
+        読み込む前に一覧を見せて確かめる。選んだファイルの場所は覚えない。"""
+        path = filedialog.askopenfilename(parent=self, title="仮名化した語を読み込むファイル",
+                                          filetypes=[("書式付きファイル・構文ファイル", f"*.pdf *{vamd.EXTENSION}"),
+                                                     ("書式付きファイル（PDF）", "*.pdf"),
+                                                     ("構文ファイル", f"*{vamd.EXTENSION}")])
+        if not path:
+            return
+        try:
+            try:
+                vamd_path, pdf_path = self.session.other_files(path)
+            except OtherFileMissing as e:
+                msg = ("この書式付きファイル（PDF）の構文ファイルが、構文ファイルのフォルダに見つかりません。構文ファイルを選びますか？"
+                       if e.kind == "vamd" else
+                       "この構文ファイルの書式付きファイル（PDF）が、これまでに保存したフォルダに見つかりません。PDF を選びますか？")
+                if not messagebox.askyesno(APP_NAME, msg + "\n（仮名化した語は、PDF と構文ファイルの両方から作り直します）",
+                                           parent=self):
+                    return
+                other = self.ask_other_file(e.kind)
+                if other is None:
+                    return
+                vamd_path, pdf_path = (other, e.found) if e.kind == "vamd" else (e.found, other)
+            loaded = self.session.entries_from(vamd_path, pdf_path, self.real_text())
+        except vamd.NoSeparator as e:
+            messagebox.showerror(APP_NAME, f"構文ファイルとして読めません。\n{e}", parent=self)
+            return
+        except (PdfMismatch, OSError, ValueError) as e:
+            messagebox.showerror(APP_NAME, f"読み込めませんでした。\n{e}", parent=self)
+            return
+        plan = loaded.plan
+        if plan.conflicts:
+            lines = "\n".join("　" + why for _, why in plan.conflicts[:10])
+            more = f"\n　ほか {len(plan.conflicts) - 10} 語" if len(plan.conflicts) > 10 else ""
+            messagebox.showwarning(APP_NAME, f"この文書の仮名化した語と食い違うため、読み込みませんでした（{loaded.pdf_path.name}）：\n"
+                                   f"{lines}{more}\n\n同じ案件のファイルなら、この文書の一覧（ダブルクリックで編集）を直してから、"
+                                   "もう一度読み込んでください。", parent=self)
+            return
+        if not plan.add:
+            messagebox.showinfo(APP_NAME, f"新しく読み込む語はありません（{loaded.pdf_path.name}。同じ語 {len(plan.same)} 語）。",
+                                parent=self)
+            return
+        if not LoadEntriesDialog(self, loaded).ok:
+            return
+        n = self.session.merge_entries(loaded)
+        self._after_dictionary_change()     # エディターの読み込んだ語を、記号に置き換える
+        self.status.configure(text=f"{loaded.pdf_path.name} の文書から、仮名化した語を {n} 語読み込みました。")
+
     def on_copy_vamd(self):
         """構文ファイルの中身をクリップボードに写す（直していれば、先に保存する）。"""
         text = self.real_text()
@@ -124,10 +175,7 @@ class AiMixin:
 
     def on_import(self):
         """［貼り付け］：クリップボードの AI の回答を、確認の画面なしでエディターに取り込む（2026-10-23 班長決定）。"""
-        try:
-            clip = self.clipboard_get()
-        except tk.TclError:
-            clip = ""
+        clip = self.clipboard_text() or ""        # clipboard_get は長い文章で字が化けることがある（editor_ops）
         if not vamd.has_separator(clip) and "==== VA Document" not in clip:
             messagebox.showinfo(APP_NAME, "クリップボードに AI の回答がありません。\n"
                                 "AI の画面で、回答のコードブロックのコピーボタンを押してから、［貼り付け］を押してください"
@@ -163,6 +211,11 @@ class AiMixin:
             problems.append("前の文章にあって、なくなった記号：" + "、".join(r.lost_tokens))
         if r.lost_marks:
             problems.append("なくなった配置などの記号：\n" + "\n".join(f"　{m}　{ln[:40]}" for m, ln in r.lost_marks[:10]))
+        if r.unknown_images:
+            problems.append("この文書にない画像の番号（画像のない枠になります）："
+                            + "、".join(f"[IMAGE {n}]" for n in r.unknown_images))
+        if r.added_images:
+            problems.append("増えた画像の行（同じ画像を2か所に置きます）：" + "、".join(f"[IMAGE {n}]" for n in r.added_images))
         if r.removed:
             restored = [self.session.dictionary.restore(ln)[0] for ln in r.removed]
             more = f"\n　ほか {len(restored) - 10} 段落" if len(restored) > 10 else ""

@@ -7,7 +7,8 @@ import fitz
 
 from va_document.doctypes import DOC_TYPES
 from va_document.document import BODY, parse, parse_table
-from va_document.layout import CELL_PAD_X, Typesetter
+from va_document.layout import Typesetter
+from va_document.layout_blocks import CELL_PAD_X
 from va_document.pdfwriter import write_pdf
 
 SAIBAN = DOC_TYPES["Saiban"]

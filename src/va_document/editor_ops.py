@@ -1,5 +1,5 @@
 """エディター（入力欄）の操作：配置・改ページなどの記号、見出しのレベル、標準、記号の色付け、貼り付け、検索
-（カーソルの上の ▼ と行への送りは editor_mark.py、表のセルの配置は table_ops.py）。
+（カーソルの上の ▼ と行への送りは editor_mark.py、表のセルの配置は table_ops.py、画像の挿入は image_ops.py）。
 
 メインの画面（app.MainWindow）の部品（mixin）。self.text（tk.Text）・self.session などは MainWindow が持つ。
 """
@@ -13,19 +13,21 @@ from .document import (ALIGN_MARKS, BLANK, BULLET, BULLET_MARK, CELL_ALIGN_RE, C
                        HEADING, HEADING_BUTTON_MARK, HEADING_MARK_RE,
                        LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, NUMBER_MARK, PAGE_BREAK, RIGHT_MARK, SECTION_BREAK,
                        TABLE, TOC, area_of,
-                       cell_separators, has_inline_marks, inline_mark_spans, is_line_mark, is_table_line, lead_mark_len,
+                       cell_separators, image_mark, has_inline_marks, inline_mark_spans, is_line_mark, is_table_line, lead_mark_len,
                        leading_wrap,
                        move_wraps_after_marks, parse, remove_bold, split_inline, split_lead_marks)
 from .editor_mark import EditorMarkMixin
 from .find_dialog import FindDialog
+from .image_ops import ImageMixin
 from .layout import is_half
 from .pseudonym import TOKEN_RE
 from .table_ops import TableCellMixin
 from .undo import undoable
 
 
-class EditorMixin(EditorMarkMixin, TableCellMixin):
-    """エディターの操作（MainWindow に混ぜて使う）。カーソルの上の ▼ は editor_mark.py、表のセルの操作は table_ops.py。"""
+class EditorMixin(EditorMarkMixin, TableCellMixin, ImageMixin):
+    """エディターの操作（MainWindow に混ぜて使う）。カーソルの上の ▼ は editor_mark.py、表のセルの操作は table_ops.py、
+    画像の操作は image_ops.py。"""
 
     def _highlight(self):
         self.text.tag_remove("registered", "1.0", "end")
@@ -658,12 +660,22 @@ class EditorMixin(EditorMarkMixin, TableCellMixin):
         self._update_title()
         self.refresh()
 
-    def _on_paste(self, event=None):
-        """貼り付け（Ctrl+V）は、仮名化した語を記号に置き換えて貼る（エディターは常に仮名。2026-10-24）。"""
+    def clipboard_text(self):
+        """クリップボードの字（なければ None）。clipboard_get ではなく selection_get で読む：Tk の clipboard_get は、
+        VA Document 自身がクリップボードに置いた約 4000 バイトを超える文章を読み戻すと、その区切りで日本語の字が化ける
+        （Tk 8.6.15。2026-10-29 に確かめた。ほかのアプリから写した文章は化けない）。"""
         try:
-            clip = self.clipboard_get()
+            return self.selection_get(selection="CLIPBOARD")
         except tk.TclError:
             return None
+
+    def _on_paste(self, event=None):
+        """貼り付け（Ctrl+V）は、仮名化した語を記号に置き換えて貼る（エディターは常に仮名。2026-10-24）。
+        クリップボードに字がなく画像だけがあれば、画像を入れる（Win+V で選んだ画像も、Windows が置き直してから Ctrl+V を
+        送るので、ここを通る。字と画像の両方があれば〔Excel・Word からのコピー〕、今までどおり字を貼る。2026-10-29 班長決定）。"""
+        clip = self.clipboard_text()
+        if not clip:
+            return "break" if self.paste_pictures() else None
         spans = self.session.dictionary.spans(clip)
         if not spans:
             return None
@@ -690,6 +702,10 @@ def _mark_spans(text):
         if is_line_mark(stripped):
             start = pos + line.index(stripped)
             out.append((start, start + len(stripped)))
+        elif image_mark(line):
+            # 画像の行（[IMAGE 1]{30}。行頭の配置の記号も含めて、行の字の全体）
+            start = pos + len(line) - len(line.lstrip(" 　"))
+            out.append((start, pos + len(line.rstrip())))
         elif is_table_line(line):
             for m in _CELL_MARK_RE.finditer(line):
                 out.append((pos + m.start(2), pos + m.end(2)))
@@ -717,7 +733,7 @@ def _structural_line(line):
 def _special_line(line):
     """見出しのレベルを変えない行（表・改ページなどの記号の行・配置の記号の行・区切りの行・空の行）。"""
     lead = split_lead_marks(move_wraps_after_marks(line))
-    return (not line.strip() or _structural_line(line)
+    return (not line.strip() or _structural_line(line) or bool(image_mark(line))
             or bool(lead.align or lead.left or lead.area))
 
 

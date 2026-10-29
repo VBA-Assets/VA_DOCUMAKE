@@ -39,7 +39,7 @@ class _Dialog(tk.Toplevel):
 
 class _TokenFields:
     """種別と記号の字の欄（仮名化・一覧の変更の画面で使う）。記号の字は自動で入れず、利用者が必ず打つ（2026-10-25 班長決定。
-    「依頼者はＡから、相手方はＸから」・氏名のイニシャル・番号・漢字など、文書をまたいで同じ人に同じ記号を付けられる
+    「自分の側はＡから、相手の側はＸから」・番号・漢字など、文書をまたいで同じ人に同じ記号を付けられる
     ように。英字・数字・漢字などを使え、字数の制限はない。はじめは英字を選ぶボタンだったが、同じ日に打ち込む欄に戻した）。"""
 
     def token_fields(self, body, dictionary, kind, letters, keep=None):
@@ -58,7 +58,7 @@ class _TokenFields:
         self.letters_box.pack(side="left")
         self.preview = ttk.Label(row, text="")
         self.preview.pack(side="left", padx=(12, 0))
-        ttk.Label(body, text="英字・数字・漢字などを使えます（例：Ａ、ＹＴ、１、甲）。", style="Note.TLabel"
+        ttk.Label(body, text="英字・数字・漢字などを使えます（例：Ａ、１、甲）。", style="Note.TLabel"
                   ).pack(anchor="w", pady=(4, 0))
         self.used_label = ttk.Label(body, text="", style="Note.TLabel", wraplength=420, justify="left")
         self.used_label.pack(anchor="w", pady=(6, 0))
@@ -280,6 +280,50 @@ class NaiyouDialog(_Dialog):
         self.destroy()
 
 
+class LoadEntriesDialog(_Dialog):
+    """［ファイルから読み込む］：読み込む仮名化した語を見せ、読み込むかを確かめる（2026-10-29 班長決定）。選んだファイルの
+    名前（どの案件の文書かを見分ける手がかり）・足す語の一覧・今の一覧と同じ語の数・今の文章で記号に置き換わる所の数・作り直せなかった
+    記号の数を出す。ok が真なら読み込む。"""
+
+    def __init__(self, parent, loaded):
+        super().__init__(parent, "仮名化した語を読み込む")
+        self.ok = False
+        body = ttk.Frame(self, padding=(16, 14, 16, 4))
+        body.pack(fill="both", expand=True)
+        plan = loaded.plan
+        ttk.Label(body, text=f"次のファイルの文書から、仮名化した語を {len(plan.add)} 語読み込みます。\n"
+                             f"　{loaded.pdf_path.name}\n"
+                             "この文書と同じ案件のファイルかを、確かめてください。",
+                  justify="left", wraplength=520).pack(anchor="w")
+        row = ttk.Frame(body)
+        row.pack(fill="both", expand=True, pady=(10, 0))
+        tree = ttk.Treeview(row, columns=("token", "word", "kind"), show="headings", height=min(max(len(plan.add), 3), 12),
+                            selectmode="none")
+        for col, label, width in (("token", "記号", 120), ("word", "元の語", 300), ("kind", "種別", 80)):
+            tree.heading(col, text=label, anchor="w")
+            tree.column(col, width=width, anchor="w", stretch=col == "word")
+        for e in sorted(plan.add, key=lambda e: (KINDS.index(e.kind), e.token)):
+            tree.insert("", "end", values=(e.token, e.word, e.kind))
+        bar = ttk.Scrollbar(row, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=bar.set)
+        tree.pack(side="left", fill="both", expand=True)
+        bar.pack(side="left", fill="y")
+        notes = []
+        if plan.same:
+            notes.append(f"この文書の一覧に同じ語・同じ記号であるもの {len(plan.same)} 語は、そのままにします。")
+        notes.append(f"今の文章で記号に置き換わる所：{loaded.occurrences} か所（PDF の字は変わりません）。")
+        if loaded.unrecovered:
+            notes.append(f"元の語を作り直せなかった記号 {loaded.unrecovered} 個は、読み込みません。")
+        ttk.Label(body, text="\n".join(notes), style="Note.TLabel", justify="left", wraplength=520
+                  ).pack(anchor="w", pady=(8, 0))
+        self.buttons("読み込む", self.accept)
+        self.run()
+
+    def accept(self):
+        self.ok = True
+        self.destroy()
+
+
 class OptionsDialog(_Dialog):
     """オプション（構文ファイルの保存場所、エディターの書体・字の大きさ・行の間隔。2026-10-24 班長指示）。
     result は {"vamd_folder", "font_family", "font_size", "line_spacing", "prompt"}（prompt は直した AI への指示。
@@ -302,7 +346,7 @@ class OptionsDialog(_Dialog):
         # 注意書きは文ごとに改行する（Tk の折り返しは語の途中で切れるため）
         ttk.Label(box, style="Note.TLabel", justify="left",
                   text="共有フォルダも選べます（ほかの人と文書を共有するとき）。\n"
-                       "このフォルダには構文ファイル（仮名化済み）だけを置き、書式付きファイル（PDF）や事件の資料（実名入り）は"
+                       "このフォルダには構文ファイル（仮名化済み）だけを置き、書式付きファイル（PDF）や案件の資料（実名入り）は"
                        "置かないでください。\n"
                        "ほかの人が構文ファイルを開いて実名に戻すには、同じ文書の書式付きファイル（PDF）も必要です。").pack(anchor="w", pady=(6, 0))
         box = ttk.Labelframe(body, text="エディター", padding=(10, 6))

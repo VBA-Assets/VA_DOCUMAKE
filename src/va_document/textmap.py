@@ -8,8 +8,8 @@
 import bisect
 from collections import defaultdict
 
-from .document import CELL_ALIGNS, TABLE, TOC, cell_separators, leading_wrap, split_inline
-from .layout import CELL_PAD_X
+from .document import CELL_ALIGNS, IMAGE, TABLE, TOC, cell_separators, leading_wrap, split_inline
+from .layout_blocks import CELL_PAD_X
 
 
 class LayoutMap:
@@ -34,6 +34,7 @@ class LayoutMap:
         self.pieces_of_para = defaultdict(list)
         for piece in ts.tables:
             self.pieces_of_para[piece.para_index].append(piece)
+        self.image_of_para = {piece.para_index: piece for piece in ts.images}
 
     # ---------- 共通 ----------
 
@@ -69,6 +70,9 @@ class LayoutMap:
         p, ts = self.paras[pi], self.ts
         if p.kind == TABLE:
             return self._locate_table(p, pi, line, col)
+        if p.kind == IMAGE and pi in self.image_of_para:
+            piece = self.image_of_para[pi]       # 画像の行は、画像の左上（高さは画像の高さ）
+            return piece.page - 1, ts.margin_left + piece.x, piece.y, piece.h
         lines = self.lines_of_para.get(pi)
         if not lines:
             # 空の行・改ページなど、字のない段落は、その行の左端
@@ -109,6 +113,12 @@ class LayoutMap:
     def hit(self, page, x, y):
         """確認表示の位置（ページ 0 から、用紙の左上からのポイント）→ エディターの位置 (元の行, 元の字)。"""
         ts = self.ts
+        for piece in ts.images:
+            # 画像を押したら、その画像の行の先頭（行頭の配置の記号の後ろ）
+            x0 = ts.margin_left + piece.x
+            if piece.page - 1 == page and x0 <= x <= x0 + piece.w and piece.y <= y < piece.y + piece.h:
+                p = self.paras[piece.para_index]
+                return self._orig(p.src_line, p.src_col)
         for piece in ts.tables:
             if piece.page - 1 != page:
                 continue

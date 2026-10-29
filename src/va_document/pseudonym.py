@@ -7,12 +7,14 @@ VA仮名化（VA仮名化\\仕様.md・basDictionary.bas）にそろえる。違
 ・解除した記号を別の語に付けるときは、確かめる（VA Documentは同じ AI の会話を何往復も続けるので、前の回答に
   残っている記号が、別の人の実名に戻ってしまうことがある。reuse_warning。2026-10-25 班長決定。それまでは、
   一度使った英字は使い直さなかった〔2026-10-23 班長決定〕）。同じ語に付け直すのは、確かめない。
-・記号の字（英字・数字・漢字など）は、画面では利用者が必ず選ぶ（自動では振らない。「依頼者はＡから、相手方はＸから」のように、文書を
+・記号の字（英字・数字・漢字など）は、画面では利用者が必ず選ぶ（自動では振らない。「自分の側はＡから、相手の側はＸから」のように、文書を
   またいで同じ人に同じ記号を付けられるように。2026-10-25 班長決定）。register の letters を省くと、その文書で
   まだ使っていない、いちばん小さい英字を振る（試験などで使う）。
+・同じ案件のほかの文書の仮名化した語を、今の一覧に足せる（［ファイルから読み込む］。plan_merge・merge。2026-10-29 班長決定）。
+  今の一覧と食い違うものが1つでもあれば足さない（今の文書の記号の元の語を変えないため）。
 """
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 KINDS = ("人名", "法人", "地名", "番号", "その他")
 OPEN, CLOSE = "〔", "〕"
@@ -110,6 +112,14 @@ class Entry:
     word: str
     kind: str
     token: str
+
+
+@dataclass
+class MergePlan:
+    """ほかの文書の仮名化した語を足すときの分け方（Dictionary.plan_merge）。"""
+    add: list = field(default_factory=list)         # 足す語（Entry）
+    same: list = field(default_factory=list)        # この一覧に同じ語・同じ記号であるもの
+    conflicts: list = field(default_factory=list)   # 食い違い [(Entry, 理由の文)]。1つでもあれば何も足さない
 
 
 class Dictionary:
@@ -250,6 +260,44 @@ class Dictionary:
             self.released[old] = e.word
             self.released.pop(token, None)
         return old
+
+    # ---------- ほかの文書からの読み込み（［ファイルから読み込む］。2026-10-29 班長決定） ----------
+
+    def plan_merge(self, entries, unknown_tokens=()):
+        """ほかの文書の仮名化した語（entries：Entry のリスト）を、この一覧に足すときの MergePlan を返す。
+        unknown_tokens は、今の文章にあって元の語が分からない記号。次のどれかに当たる語は食い違いとする
+        （検討_仮名化した語の読み込み.md の5）：1 同じ語に違う記号、2 同じ記号に違う語、3 この文書で前に別の語に
+        使った記号（AI の前の回答に残っていると、取り込むときに読み込んだ語に戻るため）、4 今の文章にある、元の語の
+        分からない記号。"""
+        plan = MergePlan()
+        by_token = {e.token: e for e in self.entries.values()}
+        unknown = {normalize_token(t) for t in unknown_tokens}
+        for e in entries:
+            token = normalize_token(e.token)
+            mine = self.entries.get(e.word)
+            other = by_token.get(token)
+            before = self.released.get(token)
+            if mine is not None and mine.token == token:
+                plan.same.append(e)
+            elif mine is not None:
+                plan.conflicts.append((e, f"「{e.word}」は、この文書では {mine.token} です（読み込む文書では {token}）。"))
+            elif other is not None:
+                plan.conflicts.append((e, f"{token} は、この文書では「{other.word}」です（読み込む文書では「{e.word}」）。"))
+            elif before is not None and before != e.word:
+                plan.conflicts.append((e, f"{token} は、この文書で前に「{before}」に使った記号です（読み込む文書では"
+                                          f"「{e.word}」）。"))
+            elif token in unknown:
+                plan.conflicts.append((e, f"{token} は、この文書の文章にありますが、元の語が分かりません（読み込む文書では"
+                                          f"「{e.word}」）。"))
+            else:
+                plan.add.append(e)
+        return plan
+
+    def merge(self, entries):
+        """MergePlan.add の語を足す（記号はそのまま使う）。"""
+        for e in entries:
+            self.add_known(e.word, e.token)
+            self.released.pop(normalize_token(e.token), None)
 
     def find(self, word_or_token):
         key = normalize_token(trim_selection(word_or_token))

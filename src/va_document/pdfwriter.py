@@ -6,6 +6,9 @@
   「メタデータなし」になるようにするため）。
 ・ファイル識別子（トレーラーの /ID）の1つ目に「VAMD:<文書ID>:<版>」を入れる。2つ目は保存し直すと
   作り直されるので使わない（2026-10-23、PyMuPDF・pikepdf で確認）。
+・画像（[IMAGE 1]{30}。2026-10-29 班長決定）は、付加情報を除いたもの（images.py）を PDF に入れ、画像の辞書に番号の目印
+  /VAMDImage を入れる（番号のほかは入れない）。開き直すときは、この番号で構文ファイルの画像の行と結び直す（read_images）。
+  画像は字を持たないので、構文ファイルとの突き合わせ（recover.py）には影響しない。
 """
 import io
 import os
@@ -22,7 +25,9 @@ from reportlab.pdfgen import canvas
 
 from .doctypes import (FW_DIGITS, PAGE_NUMBER_BOTTOM_CENTER, PAGE_NUMBER_BOTTOM_CENTER_DECORATED,
                        PAGE_NUMBER_BOTTOM_RIGHT, PAGE_NUMBER_NONE, PAGE_NUMBER_TOP_RIGHT)
-from .layout import DOT_RADIUS, DOT_RISE, DOUBLE_RULE_GAP, FONT_SIZE, PAGE_H, PAGE_W, RULE_WIDTH
+from .images import Picture
+from .layout import DOT_RADIUS, DOT_RISE, FONT_SIZE, PAGE_H, PAGE_W
+from .layout_blocks import DOUBLE_RULE_GAP, RULE_WIDTH
 
 def _font_dir():
     """同梱の書体（assets/fonts）の場所。exe（PyInstaller）では展開先（Windows の exe には入れない）。"""
@@ -57,6 +62,8 @@ LINE_NUMBER_STEP = 5
 LINE_NUMBER_PITCH = 4.2
 LINE_NUMBER_LAST_X = 22.14
 ID_PREFIX = "VAMD"
+IMAGE_KEY = "VAMDImage"         # 画像の辞書に入れる、画像の番号の目印
+MISSING_COLOR = (0.6, 0.6, 0.6)  # 画像のデータがない番号の枠（確認表示だけ）
 
 
 class FontNotEmbeddable(Exception):
@@ -118,12 +125,13 @@ def page_number_text(style, page, pages):
 
 
 def write_pdf(ts, lines, path, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTTOM_CENTER,
-              fonts=None, line_numbers=False):
+              fonts=None, line_numbers=False, images=None):
     """Typesetter（ts）で組んだ行（lines）を PDF に書き出す。doc_id があれば識別子に文書ID と版を入れる。
+    images は画像の番号 → Picture。
 
     書き出し先と同じフォルダの一時ファイルに書いてから置き換える（途中で止まっても前の版が壊れない）。
     """
-    data = pdf_bytes(ts, lines, doc_id, version, page_number, fonts, line_numbers=line_numbers)
+    data = pdf_bytes(ts, lines, doc_id, version, page_number, fonts, line_numbers=line_numbers, images=images)
     fd, tmp = tempfile.mkstemp(suffix=".pdf", dir=os.path.dirname(os.path.abspath(path)))
     try:
         with os.fdopen(fd, "wb") as f:
@@ -135,16 +143,17 @@ def write_pdf(ts, lines, path, doc_id=None, version=None, page_number=PAGE_NUMBE
 
 
 def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTTOM_CENTER, fonts=None,
-              highlight=False, line_numbers=False):
+              highlight=False, line_numbers=False, images=None):
     """組んだ結果の PDF を、メモリの中で作って返す（画面の確認表示も、これを使う。文章を一時ファイルに書かない）。
 
     highlight が真なら、蛍光ペン（==文字==）の字の後ろを黄色に塗る（確認表示だけ。保存する PDF と印刷には塗らない。
-    2026-10-24 班長指示）。line_numbers が真なら、行番号を付ける（_draw_line_numbers）。fonts は書体の組
-    （None は DEFAULT_FONTS）。
+    2026-10-24 班長指示）。画像のデータがない番号の枠も、確認表示だけに描く。line_numbers が真なら、行番号を付ける
+    （_draw_line_numbers）。fonts は書体の組（None は DEFAULT_FONTS）。images は画像の番号 → Picture。
     """
     mincho, gothic = fonts or DEFAULT_FONTS
+    images = images or {}
     pages = max((ln.page for ln in lines), default=1)
-    pages = max([pages] + [p.page for p in ts.tables])
+    pages = max([pages] + [p.page for p in ts.tables] + [p.page for p in ts.images])
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(PAGE_W, PAGE_H), invariant=1)
     # 描くときに使う書体の名前（本文、太字）。描く関数は、ここから読む
@@ -171,6 +180,8 @@ def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTT
             for g in item.glyphs:
                 _draw_glyph(c, ts.margin_left + g.x, y, g)
             _draw_dots(c, [(ts.margin_left + g.x, y, ts.advance(g.ch), g) for g in item.glyphs])
+        if highlight:
+            _draw_missing(c, ts, [p for p in ts.images if p.page == pg and p.number not in images])
         if line_numbers:
             _draw_line_numbers(c, ts, lines, pg)
         if page_number != PAGE_NUMBER_NONE:
@@ -186,8 +197,70 @@ def pdf_bytes(ts, lines, doc_id=None, version=None, page_number=PAGE_NUMBER_BOTT
         c.showPage()
     c.save()
     with fitz.open(stream=buf.getvalue(), filetype="pdf") as doc:
+        _insert_images(doc, ts, images)
         _clean_and_mark(doc, doc_id, version)
         return doc.tobytes(garbage=3, deflate=True)
+
+
+def _insert_images(doc, ts, images):
+    """画像を所定の位置に入れ、画像の辞書に番号の目印（/VAMDImage）を入れる。同じ番号の画像を2か所に置いたときは、
+    同じ画像を1つだけ入れて2か所から使う。中身が同じ画像を別の番号で入れると、PyMuPDF が1つにまとめるので、
+    目印は番号の配列（[1 2]）にする。"""
+    xrefs, numbers = {}, {}
+    for piece in ts.images:
+        pic = images.get(piece.number)
+        if pic is None:
+            continue
+        x0 = ts.margin_left + piece.x
+        rect = fitz.Rect(x0, piece.y, x0 + piece.w, piece.y + piece.h)
+        page = doc[piece.page - 1]
+        if piece.number in xrefs:
+            page.insert_image(rect, xref=xrefs[piece.number], keep_proportion=False)
+        else:
+            xref = page.insert_image(rect, stream=pic.data, keep_proportion=False)
+            xrefs[piece.number] = xref
+            numbers.setdefault(xref, []).append(piece.number)
+    for xref, ns in numbers.items():
+        doc.xref_set_key(xref, IMAGE_KEY, str(ns[0]) if len(ns) == 1 else "[" + " ".join(map(str, ns)) + "]")
+
+
+def _draw_missing(c, ts, pieces):
+    """画像のデータがない番号の枠を、線で描く（枠と対角線。字は描かない：PDF の字の並びに入れず、構文ファイルとの
+    突き合わせ〔recover.py〕を乱さないため）。"""
+    if not pieces:
+        return
+    c.saveState()
+    c.setStrokeColorRGB(*MISSING_COLOR)
+    c.setLineWidth(RULE_WIDTH)
+    for p in pieces:
+        x0, y0 = ts.margin_left + p.x, PAGE_H - p.y - p.h
+        c.rect(x0, y0, p.w, p.h, stroke=1, fill=0)
+        c.line(x0, y0, x0 + p.w, y0 + p.h)
+        c.line(x0, y0 + p.h, x0 + p.w, y0)
+    c.restoreState()
+
+
+def read_images(path):
+    """VA Documentの PDF から、番号の目印（/VAMDImage）のある画像を取り出し、{番号: Picture} を返す。取り出した
+    データは作り直さない（JPEG を保存のたびに作り直すと、画質が落ちていくため。入れるときに付加情報を除いてある）。"""
+    out = {}
+    with fitz.open(path) as doc:
+        for xref in range(1, doc.xref_length()):
+            try:
+                kind, val = doc.xref_get_key(xref, IMAGE_KEY)
+                if kind == "int":
+                    ns = [int(val)]
+                elif kind == "array":
+                    ns = [int(v) for v in val.strip("[]").split()]
+                else:
+                    continue
+                img = doc.extract_image(xref)
+            except (ValueError, RuntimeError):
+                continue
+            if img:
+                for n in ns:
+                    out.setdefault(n, Picture(img["image"], img["width"], img["height"]))
+    return out
 
 
 def _draw_highlight(c, items, color=HIGHLIGHT_COLOR):

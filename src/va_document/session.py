@@ -17,9 +17,9 @@ import fitz  # PyMuPDF
 from . import vamd
 from .cleanup import clean_lines
 from .doctypes import doc_type_for
-from .document import parse
+from .document import IMAGE_MAX, image_numbers, parse
 from .layout import Typesetter
-from .pdfwriter import pdf_bytes, read_id, write_pdf
+from .pdfwriter import pdf_bytes, read_id, read_images, write_pdf
 from .pseudonym import Dictionary, NotRegistrable, tokens_in, trim_selection
 from .recover import Recovery, rebuild_dictionary
 from .textmap import LayoutMap
@@ -37,6 +37,24 @@ class OpenResult:
         if self.recovery is None:
             return []
         return list(self.recovery.missing) + [t for t in self.recovery.conflicts if t not in self.recovery.missing]
+
+
+@dataclass
+class LoadedEntries:
+    """ほかの文書から作り直した仮名化した語（［ファイルから読み込む］。2026-10-29 班長決定）。"""
+    pdf_path: Path              # 突き合わせた書式付きファイル（確認の画面に名前を出す。案件を見分ける手がかり）
+    plan: object                # pseudonym.MergePlan
+    occurrences: int = 0        # 今の文章で、足す語が記号に置き換わる所の数
+    unrecovered: int = 0        # 作り直せなかった記号の数（構文ファイルを PDF の後に直していた、など。読み込まない）
+
+
+class OtherFileMissing(FileNotFoundError):
+    """読み込む文書の相手のファイル（PDF なら構文ファイル、構文ファイルなら PDF）が見つからない。kind は見つからない
+    ほう（"vamd"・"pdf"）、found はもう一方のパス。"""
+
+    def __init__(self, kind, found):
+        super().__init__(kind)
+        self.kind, self.found = kind, found
 
 
 class Session:
@@ -65,6 +83,10 @@ class Session:
         # 仮名化を解除した語・変える前の元の語（メモリの中だけ）。保存するとき、構文ファイルに実名のまま残って
         # いれば知らせる（2026-10-25 班長指示）
         self.released = {}
+        # 画像（[IMAGE 1]{30}。番号 → 付加情報を除いた画像。メモリの中だけ。保存すると PDF に入る。2026-10-29 班長決定）。
+        # 行を消しても、Ctrl+Z で戻せるように、閉じるまで残す（PDF に入れるのは、文章にある番号だけ）
+        self.images = {}
+        self._last_image = 0            # 振ったことのある画像の番号の最大（消した画像の番号を使い回さない）
 
     # ---------- 状態 ----------
 
@@ -96,6 +118,7 @@ class Session:
         """組む。組んだ結果とエディターの位置の対応（確認表示との連動に使う）を self.layout_map に残す。"""
         cleaned, origins, _ = clean_lines(text)
         ts = Typesetter(self.doc_type, self.settings.page_number)
+        ts.image_sizes = {n: p.size for n, p in self.images.items()}
         paras = parse(cleaned, self.doc_type)
         lines = ts.layout(paras)
         self.layout_map = LayoutMap(ts, lines, paras, cleaned, origins)
@@ -108,7 +131,7 @@ class Session:
         if highlight and self.dictionary.entries:
             self._mark_pseudonyms(ts, lines, text)
         return pdf_bytes(ts, lines, page_number=self.settings.page_number, highlight=highlight,
-                         line_numbers=self.settings.line_numbers)
+                         line_numbers=self.settings.line_numbers, images=self.images)
 
     def _mark_pseudonyms(self, ts, lines, text):
         """組んだ字のうち、仮名化した語の字に印を付ける（確認表示で、どこが仮名化されているかを示すため）。"""
@@ -153,7 +176,7 @@ class Session:
         version = self.version + 1
         ts, lines = self.typeset(text)
         write_pdf(ts, lines, str(pdf_path), self.doc_id, version, self.settings.page_number,
-                  line_numbers=self.settings.line_numbers)
+                  line_numbers=self.settings.line_numbers, images=self.images)
         vamd.write_file(self.vamd_path, self.vamd_text(text, version))
         self._vamd_stamp = _stamp(self.vamd_path)
         self.version = version
@@ -163,6 +186,74 @@ class Session:
         self.saved_settings = replace(self.settings)
         self.cfg.remember_pdf_folder(pdf_path.parent)
         self.cfg.remember_settings(self.settings)
+
+    # ---------- 画像（[IMAGE 1]{30}。2026-10-29 班長決定） ----------
+
+    def add_picture(self, picture, text):
+        """画像を加え、振った番号を返す（その文書で使ったことのある番号の最大＋1。文章にある、データのない番号も避ける）。
+        番号が IMAGE_MAX を超えるときは ValueError。"""
+        n = max([self._last_image, *self.images, *image_numbers(text.split("\n"))], default=0) + 1
+        if n > IMAGE_MAX:
+            raise ValueError(f"画像の番号が {IMAGE_MAX} を超えるため、これ以上入れられません。")
+        self.images[n] = picture
+        self._last_image = n
+        return n
+
+    def missing_images(self, text):
+        """文章にあって、画像のデータがない番号（PDF なしで開いた、別の文書から行を写した、など）。出てくる順。"""
+        return [n for n in dict.fromkeys(image_numbers(text.split("\n"))) if n not in self.images]
+
+    # ---------- ほかの文書からの読み込み（［ファイルから読み込む］。2026-10-29 班長決定） ----------
+
+    def other_files(self, path):
+        """読み込む文書の (構文ファイル, PDF) を返す。選んだのが PDF なら、識別子の文書ID で構文ファイルのフォルダから
+        構文ファイルを、構文ファイルなら、PDF を保存したことのあるフォルダから PDF を探す（開くときと同じ find_vamd・
+        find_pdf）。相手が
+        見つからなければ OtherFileMissing。VA Document の PDF でなければ ValueError。今の文書そのものなら ValueError。"""
+        path = Path(path)
+        if path.suffix.lower() == ".pdf":
+            pid = read_id(str(path))
+            if pid is None:
+                raise ValueError("VA Document で作った書式付きファイル（PDF）ではありません。")
+            self._check_other(pid[0])
+            found = self.find_vamd(pid[0])
+            if found is None:
+                raise OtherFileMissing("vamd", path)
+            return found, path
+        content = vamd.read_file(path)
+        self._check_other(content.doc_id)
+        pdf = self.find_pdf(content.doc_id)
+        if pdf is None:
+            raise OtherFileMissing("pdf", path)
+        return path, pdf
+
+    def _check_other(self, doc_id):
+        if doc_id == self.doc_id:
+            raise ValueError("選んだファイルは、今開いている文書のものです。")
+
+    def entries_from(self, vamd_path, pdf_path, text):
+        """読み込む文書の構文ファイルと PDF を突き合わせて仮名化した語を作り直し（開き直すときと同じ。対応表はメモリの
+        中だけ）、今の一覧と比べた LoadedEntries を返す。text は今の文章（実名）。今の文書は変えない。
+        作り直せなかった記号・違う語が対応した記号は読み込まない。PDF が別の文書のものなら PdfMismatch。"""
+        content = vamd.read_file(vamd_path)
+        self._check_other(content.doc_id)
+        d, r = rebuild_dictionary(content, str(pdf_path))
+        body = self.body(text)
+        known = {e.token for e in self.dictionary.entries.values()}
+        unknown = [t for t in dict.fromkeys(tokens_in(body)) if t not in known]
+        plan = self.dictionary.plan_merge(list(d.entries.values()), unknown)
+        added = Dictionary()
+        for e in plan.add:
+            added.add_known(e.word, e.token)
+        return LoadedEntries(Path(pdf_path), plan, len(added.spans(body)),
+                             len(set(r.missing) | set(r.conflicts)))
+
+    def merge_entries(self, loaded):
+        """LoadedEntries の足す語を、今の一覧に足す（食い違いがあれば何も足さない。呼ぶ側で確かめてから呼ぶ）。"""
+        if loaded.plan.conflicts:
+            raise ValueError("食い違いがあるため、読み込めません。")
+        self.dictionary.merge(loaded.plan.add)
+        return len(loaded.plan.add)
 
     # ---------- 仮名化の解除・元の語の変更 ----------
 
@@ -231,7 +322,8 @@ class Session:
     def review_answer(self, answer_text, current_text):
         """AI の回答を読み、今の文章と比べる。(Content, Review) を返す（文書ID 違い・区切りの行なしは例外）。"""
         content = vamd.parse_text(answer_text)
-        r = vamd.review(content, self.doc_id, self.version, self.body(current_text).splitlines(), self.dictionary)
+        r = vamd.review(content, self.doc_id, self.version, self.body(current_text).splitlines(), self.dictionary,
+                        self.images)
         return content, r
 
     def apply_answer(self, content, current_text):
@@ -241,6 +333,12 @@ class Session:
         return self.dictionary.restore(content.body_text)[0]
 
     # ---------- 開く（仕様.md の9.2） ----------
+
+    def find_vamd(self, doc_id):
+        """構文ファイルのフォルダから、文書ID の構文ファイル（<文書ID>.vamd）を探す（なければ None）。PDF から開くとき・
+        PDF から仮名化した語を読み込むときに使う（find_pdf と対）。"""
+        candidate = Path(self.cfg.vamd_folder) / vamd.file_name(doc_id)
+        return candidate if candidate.exists() else None
 
     def find_pdf(self, doc_id):
         """これまでに PDF を保存したフォルダから、文書ID の合う PDF を探す（版がいちばん新しいもの）。"""
@@ -284,6 +382,15 @@ class Session:
         elif pdf_path and not r.exact:
             messages.append("構文ファイルが、書式付きファイル（PDF）を保存した後に直されています。変わっていない部分から、記号の元の語を求めました。")
         self.new()
+        if pdf_path:
+            # 画像は、PDF の番号の目印で、構文ファイルの画像の行と結び直す（行の順が変わっていても取り違えない）
+            self.images = read_images(str(pdf_path))
+            self._last_image = max(self.images, default=0)
+            unused = [n for n in sorted(self.images) if n not in image_numbers(content.body)]
+            if unused:
+                messages.append("書式付きファイル（PDF）にある画像 " + "・".join(map(str, unused)) + " が、構文ファイルに"
+                                "ありません（次に保存すると、PDF から消えます。残すときは、[IMAGE 番号] の行を書き戻して"
+                                "ください）。")
         self.doc_id = content.doc_id
         self.version = max(content.version, pdf_version)
         if content.settings is not None:
@@ -315,10 +422,9 @@ class Session:
         （見出し・配置は戻さない）。
         """
         pid = read_id(str(path))
-        if pid:
-            candidate = Path(self.cfg.vamd_folder) / vamd.file_name(pid[0])
-            if candidate.exists():
-                return self.open_vamd(candidate, path)
+        found = self.find_vamd(pid[0]) if pid else None
+        if found is not None:
+            return self.open_vamd(found, path)
         text = pdf_plain_text(path)
         if not text.strip():
             # 字の層のない PDF（OCR していないスキャンなど）は、今の文書を消さずに知らせる（2026-10-24）
