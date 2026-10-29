@@ -284,8 +284,8 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
 
     def _build_ribbon(self, parent):
         """リボン。ボタンは Word のリボンと同じ形にする（組の名前を下に、大小のボタン、重ねたときだけ枠。2026-10-24
-        班長指示）。組の順は、ファイル・レイアウト・書式・挿入・編集・表示。大きいボタンは AI 連携だけ（2026-10-24
-        班長指示）。「AI 連携」の組は、ほかの組の流れから外し、白い地を枠で囲んでウィンドウの右上に置く（AI に渡す・
+        班長指示）。組の順は、ファイル・レイアウト・書式・挿入・編集・表示。大きいボタンは AI 連携の［選択範囲を仮名化］
+        （2026-10-24 班長指示）と、幅があるときの［開く］［保存］［見出し］（2026-10-30 班長指示）。「AI 連携」の組は、ほかの組の流れから外し、白い地を枠で囲んでウィンドウの右上に置く（AI に渡す・
         取り込む操作だけの組であることを示す。ほかの組が折り返しても、右上から動かない。2026-10-30 班長決定）。"""
         top = ttk.Frame(parent)
         top.pack(fill="x", padx=8, pady=(8, 0))
@@ -298,11 +298,13 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # リボンの下に境界線は引かない（上にないので、下だけだと釣り合わない。2026-10-24 班長指示）
         rb.pack(side="left", fill="x", expand=True, anchor="n", pady=(0, 4))
         # ボタンのアイコンは、ボタンの字から icons.BUTTON_ICONS で引く（ribbon.py）
+        # ［開く］［保存］［見出し］は、リボンが1段に入りきる幅があれば大きいボタンにする（入らなければ、折り返す前に
+        # 小さくする。2026-10-30 班長指示。ribbon.py）
         g = rb.group("ファイル")
-        g.small("開く", self.on_open)
+        g.small("開く", self.on_open, grow=True)
         # ［保存］は、いつも同じ見た目にする（保存していない変更があるときの青い枠は、2026-10-26 に外した。班長決定。
         # 保存していない変更は題の「＊」で示し、閉じる・開く・印刷・コピーの前に保存する〔尋ねる〕）
-        self.save_button = g.small("保存", self.on_save)
+        self.save_button = g.small("保存", self.on_save, grow=True)
         # ［閉じる］は今の文書を閉じて新しい文書にする（VA Document は終わらない）。［オプション］は構文ファイルの
         # 保存場所とエディターの見た目（2026-10-24 班長指示）
         g.small("閉じる", self.on_close_document)
@@ -341,7 +343,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # ［太字］［傍点］［均等割付］を上から順に置き（2026-10-24 班長指示）、その右に配置のボタン
         g = rb.group("書式")
         for label, mark in (("見出し", HEADING_BUTTON_MARK), ("箇条書き", BULLET_MARK), ("段落番号", NUMBER_MARK)):
-            g.small(label, lambda m=mark: self.on_paragraph_kind(m))
+            g.small(label, lambda m=mark: self.on_paragraph_kind(m), grow=label == "見出し")
         g.small("太字", self.on_bold)
         g.small("傍点", self.on_dots)
         g.small("均等割付", self.on_distribute)
@@ -375,8 +377,10 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self.register_button = g.large("選択範囲を\n仮名化", self.on_register)
         g.small("コピー", self.on_copy_vamd)
         g.small("貼り付け", self.on_import)
-        # 組の大きさが決まってから（画面に出たとき・大きさが変わったとき）高さをそろえる
+        # 組の大きさが決まってから（画面に出たとき・大きさが変わったとき）高さをそろえる。［開く］などを大きくした・
+        # 小さくしたときは、ほかの組の高さが変わるので、それも待ってそろえ直す
         self.ai_ribbon.bind("<Configure>", lambda e: self._align_ribbon_heights(), add="+")
+        rb.bind("<Configure>", lambda e: self.after_idle(self._align_ribbon_heights), add="+")
 
     def _align_ribbon_heights(self):
         """「AI 連携」の囲みと、ほかの組の高さをそろえる（組の名前の下端をそろえる）。囲みの枠と余白の分（上下で

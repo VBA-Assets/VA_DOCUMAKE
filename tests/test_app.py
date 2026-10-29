@@ -349,9 +349,11 @@ def test_save_button_is_always_plain(window, tmp_path):
     """［保存］は、保存していない変更があっても青い枠にしない（2026-10-26 班長決定）。変更は題の「＊」で示す。"""
     window.session.pdf_path = tmp_path / "準備書面.pdf"
     window._update_title()
-    assert str(window.save_button.cget("style")) == "Ribbon.TButton" and window.title().startswith("＊")
+    # 幅があるときは大きいボタン（2026-10-30 班長指示）。どちらでも、強調の青い枠のスタイルにはしない
+    plain = "RibbonLarge.TButton" if window.ribbon.expanded else "Ribbon.TButton"
+    assert str(window.save_button.cget("style")) == plain and window.title().startswith("＊")
     assert window.on_save()
-    assert str(window.save_button.cget("style")) == "Ribbon.TButton" and not window.title().startswith("＊")
+    assert str(window.save_button.cget("style")) == plain and not window.title().startswith("＊")
 
 
 def test_ribbon_groups_and_reflow(window):
@@ -387,6 +389,8 @@ def test_ribbon_groups_and_reflow(window):
     # 「レイアウト」は選択欄とチェックだけ、文字列に記号を付けるボタンは「書式」（2026-10-25 班長指示）。［見出し］
     # ［箇条書き］［段落番号］は「書式」の左端の列、その右の列に［太字］［傍点］［均等割付］（2026-10-27 班長指示）
     found = {str(b.cget("text")): b for b in _all_buttons(window)}
+    rb.reflow(1)          # 幅の決まる前と同じく、［見出し］などを小さいボタンにして置く（大きくするのは次の試験）
+    assert not rb.expanded
     assert not any(b.master is _group(window, "レイアウト").body for b in found.values())
     for text in ("見出し", "箇条書き", "段落番号", "太字", "傍点", "均等割付", "表題"):
         assert found[text].master is _group(window, "書式").body, text
@@ -395,9 +399,9 @@ def test_ribbon_groups_and_reflow(window):
     assert cells == {"見出し": (0, 0), "箇条書き": (0, 1), "段落番号": (0, 2), "太字": (1, 0), "傍点": (1, 1), "均等割付": (1, 2)}
     rb.reflow(10 ** 6)
     window.update_idletasks()
-    full = sum(g.winfo_reqwidth() for g in rb.groups)
+    full = sum(g.widths[False] for g in rb.groups)        # ボタンを小さくしたときの幅
     rb.reflow(full + 10)
-    assert len(rb._layout) == 1
+    assert len(rb._layout) == 1 and not rb.expanded
     assert str(window.register_button.cget("compound")) == "top"
     assert str(window.register_button.cget("text")) == "選択範囲を\n仮名化"     # 大きいボタンは2行
     rb.reflow(full - 10)
@@ -414,6 +418,50 @@ def test_ribbon_groups_and_reflow(window):
             assert b.winfo_x() == a.winfo_x() + a.winfo_reqwidth()
     rb.reflow(full + 10)
     assert len(rb._layout) == 1
+
+
+def test_ribbon_grows_open_save_heading_when_room(window):
+    """［開く］［保存］［見出し］は、リボンが1段に入りきる幅があれば大きいボタンにし、狭くなったら、組を折り返す前に
+    小さくする（2026-10-30 班長指示）。下に残った［閉じる］は、右の列の［オプション］の上に積む。［見出し］の下に残った
+    ［箇条書き］［段落番号］は右の列に入らないので2つで1列にし、［太字］などの列は変えない。"""
+    rb = window.ribbon
+    found = {str(b.cget("text")): b for b in _all_buttons(rb)}
+    grown = [found[t] for t in ("開く", "保存", "見出し")]
+    rb.reflow(10 ** 6)
+    large = sum(g.widths[True] for g in rb.groups)
+    small = sum(g.widths[False] for g in rb.groups)
+    assert large > small
+    window.update_idletasks()
+    assert rb.expanded and len(rb._layout) == 1
+    for b in grown:
+        assert str(b.cget("style")) == "RibbonLarge.TButton" and str(b.cget("compound")) == "top"
+        assert int(b.grid_info()["rowspan"]) == 3
+    big_images = {str(b.cget("text")): str(b.cget("image")) for b in grown}
+    # 大きいアイコンは、面を色分けした自作のアイコン（<名前>_large.svg。2026-10-30 班長決定）
+    from va_document import icons
+    for name in ("folder_open", "save", "text_header_2", "person_lock"):
+        assert icons.render_large_png(name, 32), name
+    assert str(window.register_button.cget("image")[0]) == str(
+        window.icons.image("person_lock", size=round(32 * window.icons.scale), large=True))
+    assert str(found["閉じる"].cget("style")) == "Ribbon.TButton"
+    cells = {t: (int(found[t].grid_info()["column"]), int(found[t].grid_info()["row"]))
+             for t in ("開く", "保存", "閉じる", "オプション", "見出し", "箇条書き", "段落番号", "太字", "均等割付")}
+    assert cells == {"開く": (0, 0), "保存": (1, 0), "閉じる": (2, 0), "オプション": (2, 1),
+                     "見出し": (0, 0), "箇条書き": (1, 0), "段落番号": (1, 1), "太字": (2, 0), "均等割付": (2, 2)}
+    # 大きくすると入らないが、小さければ入る幅では、小さくして1段のまま（折り返さない）
+    rb.reflow(large - 10)
+    assert not rb.expanded and len(rb._layout) == 1
+    for b in grown:
+        assert str(b.cget("style")) == "Ribbon.TButton" and str(b.cget("compound")) == "left"
+        assert int(b.grid_info()["rowspan"]) == 1
+        assert str(b.cget("image")) != big_images[str(b.cget("text"))]     # 小さいアイコンに戻す
+    assert int(found["閉じる"].grid_info()["column"]) == 0 and int(found["閉じる"].grid_info()["row"]) == 2
+    assert int(found["オプション"].grid_info()["column"]) == 1 and int(found["オプション"].grid_info()["row"]) == 0
+    # 小さくしても入らなければ折り返す（ボタンは小さいまま）
+    rb.reflow(small - 10)
+    assert not rb.expanded and len(rb._layout) == 2
+    rb.reflow(large + 10)
+    assert rb.expanded and len(rb._layout) == 1
 
 
 @pytest.mark.skipif(app.os.name != "nt", reason="IME の書体は Windows だけ")
@@ -883,8 +931,9 @@ def test_buttons_have_icons(window):
     for text in ("開く", "保存", "印刷", "閉じる", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "インデント", "太字", "均等割付",
                  "見出し", "箇条書き", "段落番号", "改ページ", "セクション区切り", "ヘッダー", "検索", "置換", "蛍光ペン", "パスをコピー"):
         assert found[text].cget("image"), text
-        # リボンの大きいボタン（［選択範囲を仮名化］）はアイコンの下に字、ほかはアイコンの右に字
-        large = text == "選択範囲を仮名化"
+        # リボンの大きいボタン（［選択範囲を仮名化］と、幅があるときの［開く］［保存］［見出し］）はアイコンの下に字、
+        # ほかはアイコンの右に字
+        large = text == "選択範囲を仮名化" or (window.ribbon.expanded and text in ("開く", "保存", "見出し"))
         assert str(found[text].cget("compound")) == ("top" if large else "left"), text
     # アイコンだけのボタンはない（ページ送り・表示倍率のボタンは、2026-10-30 になくした）
     assert not [b for b in buttons(window) if not str(b.cget("text")) and b.cget("image")]

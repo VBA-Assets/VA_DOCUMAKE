@@ -6,6 +6,9 @@
 Office の色付きアイコンのように2色にする（2026-10-24 班長指示）：同じアイコンの塗りつぶし版（<名前>_filled.svg。
 20px・filled）を薄い青（theme.ICON_TINT）で下に敷き、その上に線画を濃い色で重ねる。内側のない形（矢印・字の線）は、
 塗りつぶし版が線画と重なるので、線画のままに見える。塗りつぶし版がなければ線画だけで描く。
+リボンの大きいボタンのアイコンは、面を色分けしたフラットなアイコン（<名前>_large.svg。32px。自作。グラデーション・影は
+使わない）にする（線画を大きくするだけでは単調なため。2026-10-30 班長決定）。色は SVG に書いたまま使い、押せないときは
+小さいアイコンと同じ灰色の線画を大きくして出す。_large.svg のないアイコンは、線画を大きくする。
 """
 import re
 from pathlib import Path
@@ -42,6 +45,16 @@ def render_png(name, size, color, tint=None):
     if tint and filled.exists():
         head = re.match(r"<svg[^>]*>", svg).group(0)
         svg = head + _svg_body(filled.read_text(encoding="utf-8")).replace(SVG_FILL, tint) + _svg_body(svg) + "</svg>"
+    return _svg_png(svg, size)
+
+
+def render_large_png(name, size):
+    """大きいボタンの色付きのアイコン（<名前>_large.svg）を size 画素四方の PNG にする。なければ None。"""
+    path = ICON_DIR / f"{name}_large.svg"
+    return _svg_png(path.read_text(encoding="utf-8"), size) if path.exists() else None
+
+
+def _svg_png(svg, size):
     with fitz.open(stream=svg.encode("utf-8"), filetype="svg") as doc:
         page = doc[0]
         zoom = size / page.rect.width
@@ -59,13 +72,17 @@ class IconSet:
         self.size = max(ICON_SIZE, round(ICON_SIZE * self.scale))
         self._cache = {}
 
-    def image(self, name, disabled=False, size=None):
-        """アイコンの画像。size（画素）がなければ小さいアイコンの大きさ（リボンの大きいボタンは大きくする）。"""
+    def image(self, name, disabled=False, size=None, large=False):
+        """アイコンの画像。size（画素）がなければ小さいアイコンの大きさ（リボンの大きいボタンは大きくする）。large なら、
+        リボンの大きいボタンの色付きのアイコン（押せないときは、小さいアイコンと同じ灰色の線画）。"""
         size = size or self.size
-        key = (name, disabled, size)
+        key = (name, disabled, size, large)
         if key not in self._cache:
-            color, tint = (theme.DISABLED_TEXT, theme.ICON_TINT_DISABLED) if disabled else (theme.TEXT, theme.ICON_TINT)
-            self._cache[key] = self._tk.PhotoImage(data=render_png(name, size, color, tint))
+            data = render_large_png(name, size) if large and not disabled else None
+            if data is None:
+                color, tint = (theme.DISABLED_TEXT, theme.ICON_TINT_DISABLED) if disabled else (theme.TEXT, theme.ICON_TINT)
+                data = render_png(name, size, color, tint)
+            self._cache[key] = self._tk.PhotoImage(data=data)
         return self._cache[key]
 
     def decorate(self, widget):
