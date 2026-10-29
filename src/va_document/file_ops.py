@@ -6,8 +6,6 @@ import re
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
-import fitz  # PyMuPDF
-
 from . import APP_NAME, config, naiyou, printing, vamd
 from .dialogs import ChangedOutsideDialog, MissingDialog, NaiyouDialog, PrintDialog
 from .doctypes import PAGE_NUMBER_LABELS, PAGE_NUMBER_NONE
@@ -305,7 +303,7 @@ class FileMixin:
             return path
 
     def on_print(self):
-        """確認表示と同じページを、プリンターに実際のサイズ（A4）で印刷する。保存していない変更があれば、先に保存する
+        """印刷の画面で選んだページを、プリンターに実際のサイズ（A4）で印刷する。保存していない変更があれば、先に保存する
         （印刷したものと、保存した書式付きファイル〔PDF〕が違わないように。2026-10-26 班長指示。それまでは保存しなくても
         印刷できた）。保存をやめたら印刷しない。"""
         if not printing.available():
@@ -328,11 +326,10 @@ class FileMixin:
         except Exception as e:
             messagebox.showerror(APP_NAME, f"印刷するページを組めませんでした。\n{e}", parent=self)
             return
-        with fitz.open(stream=data, filetype="pdf") as doc:
-            pages = len(doc)
-        # VA Document の「印刷」画面で選ぶ（2026-10-24 班長決定。Windows の新しい印刷画面の紛らわしい知らせを避ける）
-        choice = PrintDialog(self, pages, self._preview_page + 1, printing.printers(),
-                             self._last_printer or printing.default_printer(), printing.show_properties).result
+        # VA Document の「印刷」画面で選ぶ（2026-10-24 班長決定。Windows の新しい印刷画面の紛らわしい知らせを避ける）。
+        # 印刷プレビューで、紙に出るものを確かめられる（2026-10-30 班長決定）
+        choice = PrintDialog(self, data, printing.printers(), self._last_printer or printing.default_printer(),
+                             printing.show_properties).result
         if choice is None:
             return
         name, mode, copies, page_list = choice

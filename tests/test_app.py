@@ -9,7 +9,7 @@ tk = pytest.importorskip("tkinter")
 
 from tkinter import messagebox  # noqa: E402
 
-from va_document import ai_ops, app, config, editor_mark, file_ops, theme, vamd  # noqa: E402
+from va_document import ai_ops, app, config, editor_mark, file_ops, preview, theme, vamd  # noqa: E402
 from va_document.document import (BULLET_MARK, CENTER_MARK, HEADING_BUTTON_MARK, PAGE_BREAK_MARK,  # noqa: E402
                                   RIGHT_MARK)
 from va_document.pdfwriter import read_id  # noqa: E402
@@ -80,9 +80,15 @@ def test_preview_scrolls_across_pages(window):
     window.update()
     window._render_visible()
     assert window.page_label.cget("text") == f"{n} / {n}" and n - 1 in window._page_images
-    window.on_page(-1)
+    # ページ送りのボタンはない（2026-10-30 班長決定）。スクロールで前のページの上の端へ送ると、番号もそのページになる
+    assert not hasattr(window, "on_page") and not hasattr(window, "on_zoom")
+    window.canvas.yview_moveto((window._page_tops[n - 2] - preview.PAGE_GAP) / window._total_height())
     window.update()
+    window._render_visible()
     assert window.page_label.cget("text") == f"{n - 1} / {n}"
+    # ページはいつも欄の幅に合わせる（横のスクロールバーはない）
+    assert window._page_size[0] == round(window._preview_doc[0].rect.width * window._fit_zoom())
+    assert not [c for c in _widgets(window._preview_pane, tk.ttk.Scrollbar) if str(c.cget("orient")) == "horizontal"]
     window.withdraw()
 
 
@@ -354,7 +360,22 @@ def test_ribbon_groups_and_reflow(window):
     rb = window.ribbon
     titles = [str(g.grid_slaves(row=1, column=0)[0].cget("text")) for g in rb.groups]
     assert titles == [g.title for g in rb.groups]
-    assert titles == ["ファイル", "AI 連携", "レイアウト", "書式", "挿入", "編集", "表示"]
+    assert titles == ["ファイル", "レイアウト", "書式", "挿入", "編集", "表示"]
+    # 「AI 連携」は、ほかの組の流れから外し、白い地を枠で囲んで右上に置く（ほかの組が折り返しても動かない。
+    # 2026-10-30 班長決定）。囲みが区切りになるので、区切りの線は引かない
+    ai = window.ai_ribbon
+    assert [g.title for g in ai.groups] == ["AI 連携"] and window.register_button.master is ai.groups[0].body
+    box = ai.master
+    assert str(box.cget("style")) == "Border.TFrame" and box.pack_info()["side"] == "right"
+    assert box.master is rb.master and rb.pack_info()["side"] == "left"
+    assert not [c for c in ai.groups[0].winfo_children() if isinstance(c, tk.ttk.Separator)]
+    style = tk.ttk.Style(window)
+    assert style.lookup("RibbonBox.TFrame", "background") == theme.FIELD_BG
+    assert style.lookup("Border.TFrame", "bordercolor") == theme.BORDER
+    assert str(window.register_button.cget("style")) == "RibbonBoxLarge.TButton"
+    # 囲みとほかの組の高さをそろえる（組の名前の下端をそろえる）
+    window._align_ribbon_heights()
+    assert rb._min_height == ai._min_height + 4 >= max(g.winfo_reqheight() for g in rb.groups)
     # 文書の種類・ページ番号の選択欄は「レイアウト」の組にあり、左端がそろう（2026-10-25 に「書式」から分け、
     # 2026-10-27 に組の名前を「スタイル」から改めた）
     window.update_idletasks()
@@ -630,8 +651,10 @@ def test_print_to_pdf_printer(window, tmp_path, monkeypatch, quiet_faulthandler)
     chosen = []
 
     class Choose:
-        def __init__(self, parent, pages, current_page, names, default, show_properties):
-            chosen.append((pages, current_page, default))
+        def __init__(self, parent, data, names, default, show_properties):
+            with fitz.open(stream=data, filetype="pdf") as doc:
+                pages = len(doc)
+            chosen.append((pages, default))
             self.result = ("Microsoft Print to PDF", None, 1, list(range(pages)))
     monkeypatch.setattr(file_ops, "PrintDialog", Choose)
     errors = []
@@ -663,7 +686,7 @@ def test_print_to_pdf_printer(window, tmp_path, monkeypatch, quiet_faulthandler)
     with fitz.open(out) as doc:
         assert len(doc) >= 1 and abs(doc[0].rect.width - 595.3) < 1 and abs(doc[0].rect.height - 841.9) < 1
     assert not errors and "1 ページをプリンターに送りました" in window.status.cget("text")
-    assert chosen[1][2] == "Microsoft Print to PDF"            # 前に使ったプリンターを選んでおく
+    assert chosen[1][1] == "Microsoft Print to PDF"            # 前に使ったプリンターを選んでおく
 
 
 def _lines(window, a, b):
@@ -848,7 +871,7 @@ def test_no_first_line_indent_button(window):
 
 
 def test_buttons_have_icons(window):
-    """ボタンにアイコン（Fluent UI System Icons）を付ける。ページ送り・表示倍率はアイコンだけ。"""
+    """ボタンにアイコン（Fluent UI System Icons）を付ける。"""
     from tkinter import ttk
     from va_document import icons
     assert window.icons is not None
@@ -858,20 +881,20 @@ def test_buttons_have_icons(window):
         return _widgets(w, ttk.Button, skip_toplevel=True)
     found = {str(b.cget("text")).replace("\n", ""): b for b in buttons(window)}
     for text in ("開く", "保存", "印刷", "閉じる", "オプション", "選択範囲を仮名化", "コピー", "貼り付け", "表題", "中央", "右", "インデント", "太字", "均等割付",
-                 "見出し", "箇条書き", "段落番号", "改ページ", "セクション区切り", "ヘッダー", "検索", "置換", "蛍光ペン", "幅に合わせる"):
+                 "見出し", "箇条書き", "段落番号", "改ページ", "セクション区切り", "ヘッダー", "検索", "置換", "蛍光ペン", "パスをコピー"):
         assert found[text].cget("image"), text
         # リボンの大きいボタン（［選択範囲を仮名化］）はアイコンの下に字、ほかはアイコンの右に字
         large = text == "選択範囲を仮名化"
         assert str(found[text].cget("compound")) == ("top" if large else "left"), text
-    icon_only = [b for b in buttons(window) if not str(b.cget("text")) and b.cget("image")]
-    assert len(icon_only) == 4
+    # アイコンだけのボタンはない（ページ送り・表示倍率のボタンは、2026-10-30 になくした）
+    assert not [b for b in buttons(window) if not str(b.cget("text")) and b.cget("image")]
     # 使うアイコンのファイルと、ライセンスの文書がそろっている
-    for name in list(icons.BUTTON_ICONS.values()) + list(icons.ICON_ONLY.values()):
+    for name in icons.BUTTON_ICONS.values():
         assert (icons.ICON_DIR / f"{name}.svg").exists(), name
     assert "MIT License" in (icons.ICON_DIR / "LICENSE").read_text(encoding="utf-8")
     assert icons.render_png("save", 24, theme.TEXT)[:4] == b"\x89PNG"
     # Office の色付きアイコンのように2色（塗りつぶし版を薄い青で下に敷く。2026-10-24 班長指示）
-    for name in list(icons.BUTTON_ICONS.values()) + list(icons.ICON_ONLY.values()):
+    for name in icons.BUTTON_ICONS.values():
         assert (icons.ICON_DIR / f"{name}_filled.svg").exists(), name
     import fitz
     pix = fitz.Pixmap(icons.render_png("save", 32, theme.TEXT, theme.ICON_TINT))
@@ -889,21 +912,11 @@ def test_buttons_have_tooltips(window):
     assert "Ctrl+B" in tooltip.TIPS["太字"] and tooltip.TIPS["太字"] in tips
     assert "Ctrl+I" in tooltip.TIPS["インデント"] and tooltip.TIPS["インデント"] in tips
     assert "Ctrl+Alt+H" in tooltip.TIPS["蛍光ペン"] and tooltip.TIPS["蛍光ペン"] in tips
-    # アイコンだけのボタン（＜ ＞ － ＋）にも、説明が付いている
-    for key in ("＜", "＞", "－", "＋"):
-        assert tooltip.TIPS[key] in tips
     # メインの画面のボタン・チェックは、すべて説明を持つ（ボタンを足したときの付け忘れを見つける。2026-10-25、
-    # ［ヘッダー］に説明がなかった）。アイコンだけのボタンは、字の代わりにアイコンの名前で見る
-    from va_document import icons
-    names = {v: k for k, v in icons.ICON_ONLY.items()}
-
+    # ［ヘッダー］に説明がなかった）
     def labels(w):
         for c in _widgets(w, (tk.ttk.Button, tk.ttk.Radiobutton, tk.Checkbutton), skip_toplevel=True):
-            text = str(c.cget("text")).replace("\n", "")
-            if not text:
-                image = str(c.cget("image")).split()
-                text = next((k for n, k in names.items() for i in image if n in i), "")
-            yield text, c
+            yield str(c.cget("text")).replace("\n", ""), c
     missing = [text for text, c in labels(window) if text and text not in tooltip.TIPS]
     assert not missing, missing
     assert tooltip.TIPS["ヘッダー"] in tips
@@ -1824,21 +1837,70 @@ def test_parse_pages():
 
 @pytest.mark.skipif(app.os.name != "nt", reason="印刷は Windows だけ")
 def test_print_dialog_choices(window):
-    """印刷の画面：プリンター・ページ（すべて・確認表示のページ・指定）・部数を選ぶ。"""
+    """印刷の画面：プリンター・ページ（すべて・指定）・部数を選ぶ。右の印刷プレビューは、印刷するページを1枚ずつ、
+    印刷と同じ灰色で見せる（2026-10-30 班長決定。「プレビューのページ」はなくした）。"""
     from va_document.dialogs import PrintDialog
-    results = []
+    window._load_text("\n".join(f"# 見出し{k}\n本文。\n<<<" for k in range(6)).rstrip("<"))
+    data = window.session.preview_pdf(window.real_text())
+    results, seen = [], []
 
     def run(setup):
         def go():
             d = [c for c in window.winfo_children() if isinstance(c, PrintDialog)][-1]
+            seen.append((str(d.page_note.cget("text")), str(d._prev.cget("state")), str(d._next.cget("state"))))
             setup(d)
+            seen.append((str(d.page_note.cget("text")), str(d.page_view.cget("text"))))
             d.accept()
         window.after(200, go)
-        return PrintDialog(window, 6, 2, ["A", "B"], "B", lambda *a: None).result
-    results.append(run(lambda d: None))
-    results.append(run(lambda d: (d.which.set("current"), d.copies.set("3"))))
-    results.append(run(lambda d: (d.which.set("range"), d.range.set("1-2, 6"), d.printer.set("A"))))
-    assert results == [("B", None, 1, [0, 1, 2, 3, 4, 5]), ("B", None, 3, [1]), ("A", None, 1, [0, 1, 5])]
+        return PrintDialog(window, data, ["A", "B"], "B", lambda *a: None).result
+    results.append(run(lambda d: d._show_page(step=1)))
+    results.append(run(lambda d: (d.which.set("range"), d.range.set("1-2, 6"), d._show_page(step=5),
+                                  d.printer.set("A"), d.copies.set("3"))))
+    assert results == [("B", None, 1, [0, 1, 2, 3, 4, 5]), ("A", None, 3, [0, 1, 5])]
+    # 開いたときは1枚目（［＜］は押せない）。ページの選び方を変えると、印刷する最初のページに戻る。最後より先には送らない
+    assert seen == [("1 ページ（1 / 6）", "disabled", "normal"), ("2 ページ（2 / 6）", ""),
+                    ("1 ページ（1 / 6）", "disabled", "normal"), ("6 ページ（3 / 3）", "")]
+
+    def check(setup):
+        def go():
+            d = [c for c in window.winfo_children() if isinstance(c, PrintDialog)][-1]
+            setup(d)
+            seen.append((str(d.page_view.cget("text")), str(d._next.cget("state")),
+                         str(d.page_view.cget("image")) == str(d._blank)))
+            d.cancel()
+        window.after(200, go)
+        return PrintDialog(window, data, ["A"], "A", lambda *a: None).result
+    seen.clear()
+    assert check(lambda d: d.which.set("range")) is None
+    assert check(lambda d: (d.which.set("range"), d.range.set("9"))) is None
+    assert [s[:2] for s in seen] == [("ページを指定してください", "disabled"), ("ページの指定を読めません", "disabled")]
+    # 読めないときは白い紙（大きさを変えない）
+    assert all(s[2] for s in seen)
+
+def test_pdf_name_is_shortened(window, tmp_path):
+    """プレビューの上の PDF の名前は、入りきらなければ後ろを「…」で省き、マウスを重ねると全体を出す。［印刷］と
+    ページの番号は押し出さない（2026-10-30）。"""
+    window.deiconify()
+    window.geometry("1000x700")
+    window.update()
+    name = "令和８年（ワ）第１２３４５号　損害賠償請求事件　原告第３準備書面（最終）" * 2 + ".pdf"
+    window.session.pdf_path = tmp_path / name
+    window.session.version = 1
+    window._update_title()
+    window.update()
+    shown = str(window.pdf_name_label.cget("text"))
+    assert shown.endswith("…") and f"書式付き（PDF）ファイル：{name}".startswith(shown[:-1])
+    assert window._pdf_name_tip.text == f"書式付き（PDF）ファイル：{name}"
+    row = window._pdf_name_row
+    assert window.print_button.winfo_x() + window.print_button.winfo_width() <= window.page_label.winfo_x()
+    assert window.page_label.winfo_x() + window.page_label.winfo_width() <= row.winfo_width()
+    window.session.pdf_path = tmp_path / "準備書面.pdf"
+    window._update_title()
+    window.update()
+    assert str(window.pdf_name_label.cget("text")) == "書式付き（PDF）ファイル：準備書面.pdf"
+    assert window._pdf_name_tip.text == ""          # 省かないときは、重ねても出さない
+    window.session.pdf_path, window.session.version = None, 0
+    window.withdraw()
 
 def test_line_numbers_check(window, tmp_path):
     """「レイアウト」の［行番号］のチェックで行番号を付ける。構文ファイルの区切りの行に残し、内容証明では付けない

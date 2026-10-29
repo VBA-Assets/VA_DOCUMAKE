@@ -7,7 +7,8 @@
 ・組の名前は、どの組も下端にそろえる（2026-10-24 班長指示）。
 ・ボタンを押しても、キーボードの焦点はエディターに残す（Word のリボンと同じ。ttk のボタンは押すと焦点を取るので、
   ボタンで書式を付けた後の Ctrl+Z〔エディターのキー〕が効かず、打った字もエディターに入らなかった。2026-10-28 班長指摘）。
-・入力欄の側の幅に組が入りきらないときは、入りきらない組を次の段に送る（Word のように組を畳んで隠すことはしない）。
+・「AI 連携」の組だけは、ほかの組の流れから外し、白い地を枠で囲んでウィンドウの右上に置く（app.py。2026-10-30 班長決定）。
+・幅に組が入りきらないときは、入りきらない組を次の段に送る（Word のように組を畳んで隠すことはしない）。
   もとは、大きいボタンだけの組（AI 連携）を小さいボタンを積んだ形に縮めてもいたが、2026-10-25 に［コピー］［貼り付け］を
   小さいボタンにして縮める組がなくなったので、その仕組みは除いた。
 """
@@ -20,16 +21,19 @@ LARGE_ICON = 32         # 大きいボタンのアイコンの大きさ（拡大
 
 
 class RibbonGroup(ttk.Frame):
-    """リボンの1つの組。ボタンは左から列ごとに置く。"""
+    """リボンの1つの組。ボタンは左から列ごとに置く。prefix はスタイルの名前の頭（囲んだ組は "RibbonBox"。囲みが
+    区切りになるので、右の区切りの線は引かない）。"""
 
-    def __init__(self, master, title, icons):
-        super().__init__(master, style="Ribbon.TFrame")
+    def __init__(self, master, title, icons, prefix="Ribbon"):
+        super().__init__(master, style=f"{prefix}.TFrame")
         self.title = title
         self.icons = icons
-        self.body = ttk.Frame(self, style="Ribbon.TFrame")
+        self.prefix = prefix
+        self.body = ttk.Frame(self, style=f"{prefix}.TFrame")
         self.body.grid(row=0, column=0, sticky="nsew", padx=2, pady=(2, 0))
-        ttk.Label(self, text=title, style="RibbonGroup.TLabel", anchor="center").grid(row=1, column=0, sticky="sew")
-        ttk.Separator(self, orient="vertical").grid(row=0, column=1, rowspan=2, sticky="ns", pady=(4, 4))
+        ttk.Label(self, text=title, style=f"{prefix}Group.TLabel", anchor="center").grid(row=1, column=0, sticky="sew")
+        if prefix == "Ribbon":
+            ttk.Separator(self, orient="vertical").grid(row=0, column=1, rowspan=2, sticky="ns", pady=(4, 4))
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)      # 組の高さがそろったとき、余りはボタンの側に回し、名前を下端にそろえる
         self._column = -1
@@ -49,14 +53,14 @@ class RibbonGroup(ttk.Frame):
         tooltip.py）。"""
         self._column += 1
         self._row = ROWS
-        b = ttk.Button(self.body, text=text, command=command, style="RibbonLarge.TButton", takefocus=False,
+        b = ttk.Button(self.body, text=text, command=command, style=f"{self.prefix}Large.TButton", takefocus=False,
                        **self._images(text, icon, True), **kw)
         b.grid(row=0, column=self._column, rowspan=ROWS, sticky="ns", padx=1)
         return b
 
     def small(self, text, command, icon=None, **kw):
         """小さいボタン（アイコンの右に字）。今の列に縦に積み、ROWS 個で次の列へ。"""
-        widget = ttk.Button(self.body, text=text, command=command, style="Ribbon.TButton", takefocus=False,
+        widget = ttk.Button(self.body, text=text, command=command, style=f"{self.prefix}.TButton", takefocus=False,
                             **self._images(text, icon, False), **kw)
         if self._row >= ROWS:
             self._column += 1
@@ -73,21 +77,29 @@ class RibbonGroup(ttk.Frame):
 
 
 class Ribbon(ttk.Frame):
-    """組を左から並べる。幅に入りきらない組は次の段に送る。"""
+    """組を左から並べる。幅に入りきらない組は次の段に送る。boxed なら、組を白い地にする（囲みの中に置く「AI 連携」）。"""
 
-    def __init__(self, master, icons):
-        super().__init__(master, style="Ribbon.TFrame")
+    def __init__(self, master, icons, boxed=False):
+        self.prefix = "RibbonBox" if boxed else "Ribbon"
+        super().__init__(master, style=f"{self.prefix}.TFrame")
         self.icons = icons
         self.groups = []
         self._lines = []          # 段ごとの枠
         self._layout = None
+        self._min_height = 0
         self.bind("<Configure>", lambda e: self.reflow(e.width))
 
     def group(self, title):
-        g = RibbonGroup(self, title, self.icons)
+        g = RibbonGroup(self, title, self.icons, self.prefix)
         self.groups.append(g)
         self.reflow(self.winfo_width())
         return g
+
+    def set_min_height(self, height):
+        """段の高さを height 画素以上にする（別に置いた組と高さをそろえ、組の名前の下端をそろえるため）。"""
+        self._min_height = height
+        for line in self._lines:
+            line.rowconfigure(0, minsize=height)
 
     def reflow(self, width):
         """幅 width に入るように、組を段に分けて置く（同じ並びなら置き直さない。Configure が続かないように）。"""
@@ -108,7 +120,8 @@ class Ribbon(ttk.Frame):
         # 段ごとに枠を分け、組を左から詰めて置く（1つの表に段と列で置くと、2段目の組が1段目の同じ列の幅に
         # 広げられ、組の間が空いた。2026-10-25 班長指摘）
         while len(self._lines) < len(rows):
-            self._lines.append(ttk.Frame(self, style="Ribbon.TFrame"))
+            self._lines.append(ttk.Frame(self, style=f"{self.prefix}.TFrame"))
+            self._lines[-1].rowconfigure(0, minsize=self._min_height)
         for r, line in enumerate(self._lines):
             if r < len(rows):
                 line.grid(row=r, column=0, sticky="w")

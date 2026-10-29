@@ -13,7 +13,7 @@ import time
 import sys
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import font as tkfont, messagebox, ttk
 
 from . import APP_NAME, __version__, config, ime, printing, theme, tooltip, vamd
 from .ai_ops import AiMixin
@@ -103,7 +103,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self._preview_page = 0
         self._page_tops = []
         self._sash_target = None        # 起動したときに戻す左右の境目の位置（_restore_window）
-        self._zoom = None               # None は幅に合わせる
+        self._pdf_name_text = ""        # プレビューの上の PDF の名前（入りきらないときは、省いて出す）
         self._loading = False
         self._last_printer = ""         # 前に印刷したプリンター（起動している間だけ覚える）
         self.geometry("1500x900")
@@ -132,7 +132,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         self._restore_window()
         # ボタンにマウスを重ねると説明を出す（アイコンだけのボタンの字を消す前に付ける）
         self._tooltips = tooltip.attach(self)
-        # リボンの外のボタン（確認表示のページ送りなど）にアイコンを付ける
+        # リボンの外のボタン（［印刷］［パスをコピー］など）にアイコンを付ける
         if self.icons is not None:
             try:
                 self.icons.decorate(self)
@@ -218,88 +218,85 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
     # ======================================================================
 
     def _build(self):
-        """左に確認表示（ウィンドウの上下いっぱい。Word や PDF のツールと同じ）、右に操作と入力欄を置く
-        （2026-10-23 班長指示）。確認表示のページ送り・表示倍率のボタンは、確認表示の最上部に置く。"""
+        """上にリボン（ウィンドウの幅いっぱい。Word や PDF のツールと同じ）、その下の左にプレビュー、右に入力欄を置く
+        （2026-10-30 班長決定。それまでは、左のプレビューをウィンドウの上下いっぱいに置き、リボンは右の入力欄の上に
+        置いていた。リボンが右の構文ファイルの名前の下にあり、PDF にも関わる「ファイル」の組が、構文ファイルだけの
+        操作に見えたため）。左右の上には、それぞれのファイルの名前と、そのファイルの操作のボタンを置く。"""
+        self._build_ribbon(self)
         self.panes = panes = tk.PanedWindow(self, orient="horizontal", sashwidth=6, bd=0)
-        panes.pack(fill="both", expand=True, padx=8, pady=8)
-        # 左：確認表示
+        panes.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        # 左：プレビュー
         self._preview_pane = preview = ttk.Frame(panes)
         self._build_preview(preview)
         panes.add(preview, minsize=300, width=620, stretch="always")
-        # 右：操作と入力欄。下の部品から順に置く（入力欄が残りの高さを使う）。名前の行は、左の PDF の名前の行の高さを
-        # 決めるので、確認表示の後に作る
+        # 右：入力欄。下の部品から順に置く（入力欄が残りの高さを使う）
         self._work_pane = work = ttk.Frame(panes)
         panes.add(work, minsize=560, stretch="always")
         self._build_name_row(work)
-        self._build_ribbon(work)
         self.status = ttk.Label(work, style="Note.TLabel", padding=(4, 4, 0, 0))
         self.status.pack(side="bottom", fill="x")
         self._build_dictionary_list(work)
         self._build_editor(work)
 
     def _build_preview(self, preview):
-        """確認表示（PDF の名前、ページ送り・表示倍率・印刷のボタン、ページを並べる canvas）。"""
-        # 確認表示の上に PDF のファイル名を出す（エディターの上には構文ファイルの名前。2026-10-24 班長指示）
-        # （右の構文ファイルの名前の行は［パスをコピー］の分だけ高いので、組み立てた後で同じ高さにそろえる）
-        self._pdf_name_row = ttk.Frame(preview)
-        self._pdf_name_row.pack(fill="x")
-        self.pdf_name_label = ttk.Label(self._pdf_name_row, style="Note.TLabel", anchor="w", padding=(0, 0, 0, 4))
+        """プレビュー（PDF の名前・［印刷］・ページの番号、ページを並べる canvas）。ページはいつも欄の幅に合わせ、
+        ページ送り・表示倍率のボタンは置かない（ページは、エディターのカーソル・ホイール・スクロールバーで送る。
+        2026-10-30 班長決定）。"""
+        # プレビューの上に PDF のファイル名を出し（2026-10-24 班長指示）、そのすぐ右に［印刷］を置く（右の構文ファイルの
+        # 名前と［パスをコピー］と同じ形。2026-10-30 班長決定。それまではページ送りの段の右端）。行の右端にページの番号
+        # （見ているページ / 全部のページ）。番号を先に置き、名前が長いときに押し出されないようにする
+        self._pdf_name_row = row = ttk.Frame(preview)
+        row.pack(fill="x")
+        self.page_label = ttk.Label(row, style="Note.TLabel", width=9, anchor="e", padding=(0, 0, 0, 4))
+        self.page_label.pack(side="right")
+        self.pdf_name_label = ttk.Label(row, style="Note.TLabel", anchor="w", padding=(0, 0, 0, 4))
         self.pdf_name_label.pack(side="left")
-        nav = ttk.Frame(preview, padding=(0, 0, 0, 4))
-        nav.pack(fill="x")
-        ttk.Button(nav, text="＜", style="Small.TButton", command=lambda: self.on_page(-1)).pack(side="left")
-        self.page_label = ttk.Label(nav, width=10, anchor="center")
-        self.page_label.pack(side="left")
-        ttk.Button(nav, text="＞", style="Small.TButton", command=lambda: self.on_page(1)).pack(side="left")
-        # ［印刷］は確認表示の機能なので、確認表示の上の段の右端に置く（2026-10-24 班長指示）。確認表示と同じページを
+        self._pdf_name_tip = tooltip.Tooltip(self.pdf_name_label, "")      # 省いたときだけ、名前の全体を出す
         # 実際のサイズで印刷する（2026-10-23 班長決定）
-        ttk.Button(nav, text="印刷", style="Small.TButton", command=self.on_print,
-                   state="normal" if printing.available() else "disabled").pack(side="right", padx=(8, 0))
-        ttk.Button(nav, text="幅に合わせる", style="Small.TButton",
-                   command=lambda: self.on_zoom(None)).pack(side="right")
-        ttk.Button(nav, text="＋", style="Small.TButton", command=lambda: self.on_zoom(1)).pack(side="right", padx=(0, 4))
-        self.zoom_label = ttk.Label(nav, width=6, anchor="center")
-        self.zoom_label.pack(side="right")
-        ttk.Button(nav, text="－", style="Small.TButton", command=lambda: self.on_zoom(-1)).pack(side="right")
+        self.print_button = ttk.Button(row, text="印刷", style="Small.TButton", command=self.on_print,
+                                       state="normal" if printing.available() else "disabled")
+        self.print_button.pack(side="left", padx=(8, 0), pady=(0, 4))
+        row.bind("<Configure>", lambda e: self._fit_pdf_name(), add="+")
         holder = ttk.Frame(preview)
         holder.pack(fill="both", expand=True)
         self.canvas = tk.Canvas(holder, yscrollincrement=PREVIEW_SCROLL_STEP)
         self._preview_yscroll = ttk.Scrollbar(holder, orient="vertical", command=self.canvas.yview)
-        cxs = ttk.Scrollbar(holder, orient="horizontal", command=self.canvas.xview)
-        self.canvas.configure(yscrollcommand=self._on_yscroll, xscrollcommand=cxs.set)
+        self.canvas.configure(yscrollcommand=self._on_yscroll)
         self._preview_yscroll.pack(side="right", fill="y")
-        cxs.pack(side="bottom", fill="x")
         self.canvas.pack(side="left", fill="both", expand=True)
-        self.canvas.bind("<Configure>", lambda e: self._layout_pages() if self._zoom is None else self._render_visible())
+        self.canvas.bind("<Configure>", lambda e: self._layout_pages())
         self.canvas.bind("<MouseWheel>", lambda e: self.canvas.yview_scroll(-3 if e.delta > 0 else 3, "units"))
         # 確認表示をクリックすると、その字の位置にエディターのカーソルを動かす（2026-10-23 班長指示）
         self.canvas.bind("<Button-1>", self.on_preview_click)
 
     def _build_name_row(self, work):
-        """エディターの側の最上段：構文ファイルの名前と［パスをコピー］。"""
-        # 構文ファイルの名前と版は、リボンの上に、確認表示の上の PDF のファイル名と高さをそろえて出す（2026-10-24 班長指示）
-        # 名前の右に［パスをコピー］（構文ファイルのフルパスをコピーする。Claude Code に「このファイルを直して」と渡す、
-        # Claude の添付の画面の「ファイル名」の欄に貼る、などに使う。2026-10-24 班長指示）
+        """エディターの最上段：構文ファイルの名前と［パスをコピー］。"""
+        # 構文ファイルの名前は、エディターのすぐ上に、プレビューの上の PDF のファイル名と高さをそろえて出す（2026-10-24
+        # 班長指示。どちらの行にも同じ大きさのボタンがあるので、高さは自然にそろう）。名前の右に［パスをコピー］（構文
+        # ファイルのフルパスをコピーする。Claude Code に「このファイルを直して」と渡す、Claude の添付の画面の「ファイル名」
+        # の欄に貼る、などに使う。2026-10-24 班長指示）
         name_row = ttk.Frame(work)
         name_row.pack(fill="x")
         self.doc_id_label = ttk.Label(name_row, style="Note.TLabel", anchor="w", padding=(4, 0, 0, 4))
         self.doc_id_label.pack(side="left")
         self.copy_path_button = ttk.Button(name_row, text="パスをコピー", style="Small.TButton", command=self.on_copy_path)
         self.copy_path_button.pack(side="left", padx=(8, 0), pady=(0, 4))
-        # 左の PDF の名前の行を同じ高さにし、確認表示のページ送りの段とリボンの上端をそろえる
-        # （右の行の大きさが決まるたびに合わせる。画面の配置を確定させる update は呼ばない。起動の途中で呼ぶと、
-        # 左右の欄の幅とリボンの折り返しが変わった）
-        self._pdf_name_row.configure(height=self.copy_path_button.winfo_reqheight() + 4)
-        self._pdf_name_row.pack_propagate(False)
-        name_row.bind("<Configure>", lambda e: self._pdf_name_row.configure(height=e.height), add="+")
 
-    def _build_ribbon(self, work):
+    def _build_ribbon(self, parent):
         """リボン。ボタンは Word のリボンと同じ形にする（組の名前を下に、大小のボタン、重ねたときだけ枠。2026-10-24
-        班長指示）。組の順は、それまでの3段の並び（ファイル・AI 連携／文書の種類・ページ番号・書式／挿入・編集・表示）
-        のとおり。大きいボタンは AI 連携だけ（2026-10-24 班長指示）。"""
-        self.ribbon = rb = Ribbon(work, self.icons)
+        班長指示）。組の順は、ファイル・レイアウト・書式・挿入・編集・表示。大きいボタンは AI 連携だけ（2026-10-24
+        班長指示）。「AI 連携」の組は、ほかの組の流れから外し、白い地を枠で囲んでウィンドウの右上に置く（AI に渡す・
+        取り込む操作だけの組であることを示す。ほかの組が折り返しても、右上から動かない。2026-10-30 班長決定）。"""
+        top = ttk.Frame(parent)
+        top.pack(fill="x", padx=8, pady=(8, 0))
+        # 囲みを先に置く（ウィンドウが狭いときは、ほかの組の側が縮んで折り返す）
+        box = ttk.Frame(top, style="Border.TFrame", padding=1)
+        box.pack(side="right", anchor="n", pady=(0, 4))
+        self.ai_ribbon = Ribbon(box, self.icons, boxed=True)
+        self.ai_ribbon.pack()
+        self.ribbon = rb = Ribbon(top, self.icons)
         # リボンの下に境界線は引かない（上にないので、下だけだと釣り合わない。2026-10-24 班長指示）
-        rb.pack(fill="x", pady=(0, 4))
+        rb.pack(side="left", fill="x", expand=True, anchor="n", pady=(0, 4))
         # ボタンのアイコンは、ボタンの字から icons.BUTTON_ICONS で引く（ribbon.py）
         g = rb.group("ファイル")
         g.small("開く", self.on_open)
@@ -311,12 +308,6 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         g.small("閉じる", self.on_close_document)
         # 過去の文書を使い回す［コピーとして開く］［名前を付けて保存］は置かない（2026-10-25 班長決定。仕様.md の9.4）
         g.small("オプション", self.on_options)
-        # 仮名化・コピー・貼り付けは一連の操作なので、1つの組にし、「ファイル」のすぐ右に置く（2026-10-23 班長指示）。
-        # ［選択範囲を仮名化］は大きいボタン、［コピー］［貼り付け］はその右に積む小さいボタンにする（2026-10-24・25 班長指示）
-        g = rb.group("AI 連携")
-        self.register_button = g.large("選択範囲を\n仮名化", self.on_register)
-        g.small("コピー", self.on_copy_vamd)
-        g.small("貼り付け", self.on_import)
         # 文書の種類・ページ番号の選択欄と、行番号・番号1字のチェックは「レイアウト」の組、文字列に記号を付けるボタンは
         # 「書式」の組にする（2026-10-25 班長指示で1つの「書式」の組から分け、2026-10-27 班長指示で［見出し］［箇条書き］
         # ［段落番号］を「スタイル」から「書式」の左端の列に移した）。組の名前は、見出しなどを移した後の中身に合わせて、
@@ -378,6 +369,25 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # 蛍光ペンは「表示」の組にして、「編集」の右に置く（確認表示だけに出し、PDF・印刷には出さない。2026-10-24 班長指示）
         g = rb.group("表示")
         g.small("蛍光ペン", self.on_highlight)
+        # 仮名化・コピー・貼り付けは一連の操作なので、1つの組にする（2026-10-23 班長指示）。［選択範囲を仮名化］は
+        # 大きいボタン、［コピー］［貼り付け］はその右に積む小さいボタンにする（2026-10-24・25 班長指示）
+        g = self.ai_ribbon.group("AI 連携")
+        self.register_button = g.large("選択範囲を\n仮名化", self.on_register)
+        g.small("コピー", self.on_copy_vamd)
+        g.small("貼り付け", self.on_import)
+        # 組の大きさが決まってから（画面に出たとき・大きさが変わったとき）高さをそろえる
+        self.ai_ribbon.bind("<Configure>", lambda e: self._align_ribbon_heights(), add="+")
+
+    def _align_ribbon_heights(self):
+        """「AI 連携」の囲みと、ほかの組の高さをそろえる（組の名前の下端をそろえる）。囲みの枠と余白の分（上下で
+        2 画素ずつ）を差し引く。"""
+        frame = 4
+        main = max((g.winfo_reqheight() for g in self.ribbon.groups), default=0)
+        ai = max((g.winfo_reqheight() for g in self.ai_ribbon.groups), default=0)
+        height = max(main, ai + frame)
+        if height != self.ribbon._min_height:
+            self.ribbon.set_min_height(height)
+            self.ai_ribbon.set_min_height(height - frame)
 
     def _build_dictionary_list(self, work):
         """仮名化した語の一覧（エディターの下。下の状態の欄の上）。"""
@@ -633,12 +643,31 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # 保存していない文書は、エディターが空なら「開かれていません」（起動したとき・閉じた後）、書いていれば
         # 「保存していません」（2026-10-24 班長指摘）
         none = "（開かれていません）" if not self.raw_text().strip() else "（保存していません）"
-        self.pdf_name_label.configure(text=f"書式付き（PDF）ファイル：{s.pdf_path.name}" if s.pdf_path and s.version else f"書式付き（PDF）ファイル：{none}")
+        self._pdf_name_text = (f"書式付き（PDF）ファイル：{s.pdf_path.name}" if s.pdf_path and s.version
+                               else f"書式付き（PDF）ファイル：{none}")
+        self._fit_pdf_name()
         # 版は画面に出さない（PDF と構文ファイルの組を確かめる内部の仕組み。古い回答の知らせなどで、必要なときだけ出す。
         # 2026-10-24 班長指示）
         self.doc_id_label.configure(text=f"構文（VAMD）ファイル：{s.vamd_path.name}"
                                     if s.version else f"構文（VAMD）ファイル：{none}")
         self.copy_path_button.configure(state="normal" if s.version else "disabled")
+
+    def _fit_pdf_name(self):
+        """PDF の名前が行に入りきらないときは、後ろを「…」で省き、マウスを重ねると全体を出す（［印刷］とページの番号を
+        押し出さないように。2026-10-30）。行の幅がまだ決まっていないときは、省かない。"""
+        text = self._pdf_name_text
+        room = (self._pdf_name_row.winfo_width() - self.print_button.winfo_reqwidth()
+                - self.page_label.winfo_reqwidth() - 16)
+        shown = text
+        if room > 1:
+            font = tkfont.nametofont(ttk.Style(self).lookup("TLabel", "font") or "TkDefaultFont")
+            if font.measure(text) > room:
+                while shown and font.measure(shown + "…") > room:
+                    shown = shown[:-1]
+                shown += "…"
+        if str(self.pdf_name_label.cget("text")) != shown:
+            self.pdf_name_label.configure(text=shown)
+        self._pdf_name_tip.text = text if shown != text else ""
 
 
 APP_USER_MODEL_ID = "VBAAssets.VADocument.Source"

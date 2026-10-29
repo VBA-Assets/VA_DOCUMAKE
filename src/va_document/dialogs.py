@@ -458,13 +458,22 @@ class PromptDialog(_Dialog):
 class PrintDialog(_Dialog):
     """VA Document の「印刷」画面（プリンター・部数・ページ。2026-10-24 班長決定。Windows 11 の新しい印刷画面は、
     プレビューの欄に「このアプリは印刷プレビューをサポートしていません」と出て紛らわしいため）。
+    右に印刷プレビューを置く（印刷するページを1枚ずつ、紙に出るものと同じ色〔字だけのページは灰色、画像のあるページは
+    カラー。printing.page_colorspace〕の1ページ全体で見せる。蛍光ペンと仮名化する語の色は、PDF・印刷と同じく付かない。
+    2026-10-30 班長決定）。pdf_data は印刷する PDF（バイト列）。
     result は (プリンターの名前, DEVMODE〔プロパティで直さなければ None〕, 部数, ページ〔0 から〕のリスト)。やめたら None。"""
 
-    def __init__(self, parent, pages, current_page, printer_names, chosen, show_properties):
+    PREVIEW_HEIGHT = 380    # 印刷プレビューのページの高さ（画素。画面の拡大率 100% のとき）
+
+    def __init__(self, parent, pdf_data, printer_names, chosen, show_properties):
+        import fitz  # PyMuPDF
         super().__init__(parent, "印刷")
         self.result = None
-        self.pages, self.current_page, self.show_properties = pages, current_page, show_properties
+        self.doc = fitz.open(stream=pdf_data, filetype="pdf")
+        self.pages, self.show_properties = len(self.doc), show_properties
+        pages = self.pages
         self.modes = {}             # プリンター → プロパティで直した設定
+        self._build_preview()
         body = ttk.Frame(self, padding=(16, 14, 16, 4))
         body.pack(fill="both")
         box = ttk.Labelframe(body, text="プリンター", padding=(10, 6))
@@ -477,28 +486,94 @@ class PrintDialog(_Dialog):
         box = ttk.Labelframe(body, text="印刷するページ", padding=(10, 6))
         box.pack(fill="x", pady=(10, 0))
         self.which = tk.StringVar(value="all")
+        # 「プレビューのページ」は置かない（プレビューにページ送りがなく、見ているページを選ぶ場面がないため。1ページだけ
+        # 刷るときは、番号を指定して印刷プレビューで確かめる。2026-10-30 班長決定）
         ttk.Radiobutton(box, text=f"すべて（{pages} ページ）", value="all", variable=self.which).grid(
             row=0, column=0, columnspan=2, sticky="w", pady=1)
-        ttk.Radiobutton(box, text=f"確認表示のページ（{current_page} ページ目）", value="current",
-                        variable=self.which).grid(row=1, column=0, columnspan=2, sticky="w", pady=1)
         ttk.Radiobutton(box, text="ページを指定", value="range", variable=self.which).grid(
-            row=2, column=0, sticky="w", pady=1)
+            row=1, column=0, sticky="w", pady=1)
         self.range = tk.StringVar()
         entry = ttk.Entry(box, textvariable=self.range, width=20)
-        entry.grid(row=2, column=1, sticky="w", padx=(6, 0))
+        entry.grid(row=1, column=1, sticky="w", padx=(6, 0))
         entry.bind("<FocusIn>", lambda e: self.which.set("range"))
-        ttk.Label(box, text="例：1-3, 5", style="Note.TLabel").grid(row=2, column=2, sticky="w", padx=(6, 0))
+        ttk.Label(box, text="例：1-3, 5", style="Note.TLabel").grid(row=1, column=2, sticky="w", padx=(6, 0))
+        # ページの選び方を変えたら、印刷プレビューを、印刷する最初のページにする
+        self.which.trace_add("write", lambda *a: self._show_page(reset=True))
+        self.range.trace_add("write", lambda *a: self._show_page(reset=True))
         row = ttk.Frame(body)
         row.pack(fill="x", pady=(10, 0))
         ttk.Label(row, text="部数").pack(side="left")
         self.copies = tk.StringVar(value="1")
         ttk.Spinbox(row, textvariable=self.copies, from_=1, to=99, width=5).pack(side="left", padx=(8, 0))
         ttk.Label(body, style="Note.TLabel", justify="left",
-                  text="確認表示と同じページを、A4 の実際の大きさで印刷します。\n"
+                  text="印刷プレビューのとおりに、A4 の実際の大きさで印刷します。\n"
                        "用紙のトレイ・両面などは、［プロパティ］で決めてください。").pack(anchor="w", pady=(10, 0))
         self.buttons("印刷", self.accept, "キャンセル")
         self.bind("<Return>", lambda e: self.accept())
+        self._show_page(reset=True)
         self.run()
+
+    def _build_preview(self):
+        """右の印刷プレビュー（ページの絵と、印刷するページを送る［＜］［＞］）。左の欄より先に置く（ボタンの段は左の欄の下）。"""
+        side = ttk.Frame(self, padding=(0, 14, 16, 12))
+        side.pack(side="right", fill="y")
+        ttk.Label(side, text="印刷プレビュー", style="Note.TLabel").pack(anchor="w")
+        scale = max(1.0, self.winfo_fpixels("1i") / 96)
+        rect = self.doc[0].rect
+        self._zoom = self.PREVIEW_HEIGHT * scale / rect.height
+        w, h = round(rect.width * self._zoom), round(rect.height * self._zoom)
+        # 読めない指定のときに出す白い紙（絵の大きさを変えず、画面が伸び縮みしないように）
+        self._blank = tk.PhotoImage(width=w, height=h)
+        self._blank.put(theme.FIELD_BG, to=(0, 0, w, h))
+        holder = ttk.Frame(side, style="Border.TFrame", padding=1)
+        holder.pack(pady=(4, 6))
+        self.page_view = tk.Label(holder, image=self._blank, compound="center", borderwidth=0,
+                                  background=theme.FIELD_BG, foreground=theme.NOTE)
+        self.page_view.pack()
+        nav = ttk.Frame(side)
+        nav.pack()
+        self._prev = ttk.Button(nav, text="＜", style="Small.TButton", command=lambda: self._show_page(step=-1))
+        self._prev.pack(side="left")
+        self.page_note = ttk.Label(nav, width=18, anchor="center")
+        self.page_note.pack(side="left")
+        self._next = ttk.Button(nav, text="＞", style="Small.TButton", command=lambda: self._show_page(step=1))
+        self._next.pack(side="left")
+        self._shown = 0             # 印刷するページのうち、見せている順番（0 から）
+
+    def _chosen_pages(self):
+        """印刷するページ（0 から）のリスト。指定が読めなければ ValueError。"""
+        from .printing import parse_pages
+        if self.which.get() == "all":
+            return list(range(self.pages))
+        return parse_pages(self.range.get(), self.pages)
+
+    def _show_page(self, step=0, reset=False):
+        """印刷するページのうち、今の順番から step だけ送ったページを、印刷と同じ色で見せる。"""
+        import fitz  # PyMuPDF
+        from .printing import page_colorspace
+        try:
+            pages = self._chosen_pages()
+        except ValueError:
+            message = "ページを指定してください" if not self.range.get().strip() else "ページの指定を読めません"
+            self.page_view.configure(image=self._blank, text=message)
+            self.page_note.configure(text="")
+            self._prev.configure(state="disabled")
+            self._next.configure(state="disabled")
+            return
+        self._shown = 0 if reset else max(0, min(len(pages) - 1, self._shown + step))
+        k = pages[self._shown]
+        page = self.doc[k]
+        pix = page.get_pixmap(matrix=fitz.Matrix(self._zoom, self._zoom), colorspace=page_colorspace(page), alpha=False)
+        self._page_image = tk.PhotoImage(data=pix.tobytes("png"))
+        self.page_view.configure(image=self._page_image, text="")
+        self.page_note.configure(text=f"{k + 1} ページ（{self._shown + 1} / {len(pages)}）")
+        self._prev.configure(state="normal" if self._shown > 0 else "disabled")
+        self._next.configure(state="normal" if self._shown < len(pages) - 1 else "disabled")
+
+    def destroy(self):
+        if not self.doc.is_closed:
+            self.doc.close()
+        super().destroy()
 
     def properties(self):
         name = self.printer.get()
@@ -513,7 +588,6 @@ class PrintDialog(_Dialog):
             self.modes[name] = mode
 
     def accept(self):
-        from .printing import parse_pages
         name = self.printer.get()
         if not name:
             messagebox.showerror("印刷", "プリンターを選んでください。", parent=self)
@@ -525,18 +599,12 @@ class PrintDialog(_Dialog):
         except ValueError:
             messagebox.showerror("印刷", "部数は 1〜99 の数字にしてください。", parent=self)
             return
-        which = self.which.get()
-        if which == "all":
-            pages = list(range(self.pages))
-        elif which == "current":
-            pages = [self.current_page - 1]
-        else:
-            try:
-                pages = parse_pages(self.range.get(), self.pages)
-            except ValueError:
-                messagebox.showerror("印刷", f"ページの指定を読めません（1〜{self.pages} の数字を、「1-3, 5」のように"
-                                     "書いてください）。", parent=self)
-                return
+        try:
+            pages = self._chosen_pages()
+        except ValueError:
+            messagebox.showerror("印刷", f"ページの指定を読めません（1〜{self.pages} の数字を、「1-3, 5」のように"
+                                 "書いてください）。", parent=self)
+            return
         self.result = (name, self.modes.get(name), copies, pages)
         self.destroy()
 

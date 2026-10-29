@@ -27,10 +27,8 @@ BUTTON_ICONS = {
     "見出し": "text_header_2", "箇条書き": "text_bullet_list_ltr", "段落番号": "text_number_list_ltr",
     "改ページ": "document_page_break", "セクション区切り": "document_split_hint", "目次": "text_bullet_list_square",
     "ヘッダー": "document_header", "画像": "image",     # image は自作（Fluent の image にならった線画。2026-10-29）
-    "パスをコピー": "copy", "ファイルから読み込む": "folder_open", "検索": "search", "蛍光ペン": "highlight", "置換": "arrow_swap", "幅に合わせる": "arrow_autofit_width",
+    "パスをコピー": "copy", "ファイルから読み込む": "folder_open", "検索": "search", "蛍光ペン": "highlight", "置換": "arrow_swap",
 }
-# アイコンだけにするボタン（字は付けない）
-ICON_ONLY = {"＜": "chevron_left", "＞": "chevron_right", "－": "zoom_out", "＋": "zoom_in"}
 
 
 def _svg_body(svg):
@@ -76,11 +74,8 @@ class IconSet:
         for child in widget.winfo_children():
             if isinstance(child, ttk.Button) and not child.cget("image"):    # リボンのボタンは作るときに付けた
                 text = str(child.cget("text"))
-                name = BUTTON_ICONS.get(text) or ICON_ONLY.get(text)
+                name = BUTTON_ICONS.get(text)
                 if name:
                     images = (self.image(name), "disabled", self.image(name, disabled=True))
-                    if text in ICON_ONLY:
-                        child.configure(image=images, text="", compound="image")
-                    else:
-                        child.configure(image=images, compound="left")
+                    child.configure(image=images, compound="left")
             self.decorate(child)

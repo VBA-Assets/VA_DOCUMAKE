@@ -109,19 +109,24 @@ def apply_theme(root):
     style.configure("Small.TButton", padding=(8, 1), width=-4)
     # リボンのボタン（Word のリボンと同じく、ふだんは枠も地もなく、重ねたときだけ淡い青の地と枠。班長の UI 方針の
     # 「常時、細い枠線」の、このツールだけの例外。2026-10-24 班長決定）
-    ribbon_states = dict(
-        background=[("disabled", WINDOW_BG), ("pressed", PRESSED_BG), ("active", HOVER_BG)],
-        lightcolor=[("disabled", WINDOW_BG), ("pressed", PRESSED_BG), ("active", HOVER_BG)],
-        darkcolor=[("disabled", WINDOW_BG), ("pressed", PRESSED_BG), ("active", HOVER_BG)],
-        bordercolor=[("disabled", WINDOW_BG), ("pressed", RIBBON_HOVER_BORDER), ("active", RIBBON_HOVER_BORDER)])
-    for name, padding in (("Ribbon.TButton", (3, 1)), ("RibbonLarge.TButton", (4, 2))):
-        style.configure(name, background=WINDOW_BG, bordercolor=WINDOW_BG, lightcolor=WINDOW_BG,
-                        darkcolor=WINDOW_BG, padding=padding, width=0, anchor="w" if name == "Ribbon.TButton" else "center",
-                        justify="center")
-        style.map(name, **ribbon_states)
-    style.configure("Ribbon.TFrame", background=WINDOW_BG)
-    style.configure("Ribbon.TLabel", background=WINDOW_BG)
-    style.configure("RibbonGroup.TLabel", background=WINDOW_BG, foreground=NOTE, padding=(0, 0, 0, 2))
+    # 「AI 連携」の組（RibbonBox*）は、白い地を細い灰色の枠で囲み、ほかの組（Ribbon*）と分ける（AI に渡す・取り込む
+    # 操作だけの組。2026-10-30 班長決定）
+    for prefix, bg in (("Ribbon", WINDOW_BG), ("RibbonBox", FIELD_BG)):
+        ribbon_states = dict(
+            background=[("disabled", bg), ("pressed", PRESSED_BG), ("active", HOVER_BG)],
+            lightcolor=[("disabled", bg), ("pressed", PRESSED_BG), ("active", HOVER_BG)],
+            darkcolor=[("disabled", bg), ("pressed", PRESSED_BG), ("active", HOVER_BG)],
+            bordercolor=[("disabled", bg), ("pressed", RIBBON_HOVER_BORDER), ("active", RIBBON_HOVER_BORDER)])
+        for name, padding, anchor in ((f"{prefix}.TButton", (3, 1), "w"), (f"{prefix}Large.TButton", (4, 2), "center")):
+            style.configure(name, background=bg, bordercolor=bg, lightcolor=bg, darkcolor=bg, padding=padding, width=0,
+                            anchor=anchor, justify="center")
+            style.map(name, **ribbon_states)
+        style.configure(f"{prefix}.TFrame", background=bg)
+        style.configure(f"{prefix}.TLabel", background=bg)
+        style.configure(f"{prefix}Group.TLabel", background=bg, foreground=NOTE, padding=(0, 0, 0, 2))
+    # 囲みの枠（「AI 連携」の組・印刷プレビューのページ。1画素の灰色。内側の線は地と同じ白にして、枠を1本に見せる）
+    style.configure("Border.TFrame", background=FIELD_BG, borderwidth=1, relief="solid", bordercolor=BORDER,
+                    lightcolor=FIELD_BG, darkcolor=FIELD_BG)
 
     style.configure("Note.TLabel", foreground=NOTE)
     style.configure("TEntry", fieldbackground=FIELD_BG, bordercolor=BORDER, lightcolor=FIELD_BG,

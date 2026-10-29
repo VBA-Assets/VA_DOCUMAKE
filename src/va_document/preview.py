@@ -1,4 +1,6 @@
-"""確認表示：組んだ PDF の全ページを縦に並べて表示し、エディターと連動させる（仕様.md の4）。
+"""確認表示：組んだ PDF の全ページを縦に並べて表示し、エディターと連動させる（仕様.md の4）。ページはいつも欄の幅に
+合わせる（拡大・縮小とページ送りのボタンは置かない。ページは、エディターのカーソル・ホイール・スクロールバーで送る。
+2026-10-30 班長決定）。
 
 メインの画面（app.MainWindow）の部品（mixin）。self.canvas・self.session などは MainWindow が持つ。
 """
@@ -12,7 +14,6 @@ from .pdfwriter import FontNotEmbeddable
 from .pseudonym import TOKEN_RE
 
 
-ZOOM_STEPS = (0.5, 0.67, 0.75, 0.9, 1.0, 1.25, 1.5, 2.0)
 PAGE_GAP = 12               # 確認表示のページの間（画素）
 CURRENT_PAGE_BORDER = 3             # 編集中のページを囲む線の太さ（画素）
 CARET_SIZE, CARET_MIN_SIZE = 5, 4   # 確認表示の印（▼）の幅の半分（ポイント×表示倍率。小さくしすぎない画素）
@@ -30,7 +31,7 @@ class PreviewMixin:
             self.status.configure(text=str(e))
             return
         except Exception as e:      # 組めない文章でも、入力は続けられるようにする
-            self.status.configure(text=f"確認表示を作れませんでした：{e}")
+            self.status.configure(text=f"プレビューを作れませんでした：{e}")
             return
         if self._preview_doc is not None:
             self._preview_doc.close()
@@ -49,9 +50,8 @@ class PreviewMixin:
             self.status.configure(text="")
         self._layout_warning = warning
 
-    def _current_zoom(self):
-        if self._zoom is not None:
-            return self._zoom
+    def _fit_zoom(self):
+        """ページを欄の幅に合わせる倍率。"""
         width = max(self.canvas.winfo_width(), 100)
         return (width - 2 * PAGE_GAP - 8) / self._preview_doc[0].rect.width
 
@@ -65,7 +65,7 @@ class PreviewMixin:
         if doc is None or not len(doc):
             return
         fraction = self.canvas.yview()[0] if keep else 0.0
-        zoom = self._current_zoom()
+        zoom = self._fit_zoom()
         width = max(self.canvas.winfo_width(), 100)
         self._page_size = (round(doc[0].rect.width * zoom), round(doc[0].rect.height * zoom))
         pw, ph = self._page_size
@@ -79,7 +79,6 @@ class PreviewMixin:
             self.canvas.create_rectangle(x - 1, top - 1, x + pw, top + ph, outline=theme.BORDER, fill="white")
         self.canvas.configure(scrollregion=(0, 0, max(x + pw + PAGE_GAP, width), self._total_height()))
         self.canvas.yview_moveto(fraction)
-        self.zoom_label.configure(text=f"{round(zoom * 100)}%")
         self._render_visible()
         self._show_caret(scroll=False)
 
@@ -229,26 +228,3 @@ class PreviewMixin:
             if t - PAGE_GAP <= y:
                 k = i
         return k
-
-    def on_page(self, step):
-        """前・次のページの上の端まで送る。"""
-        if self._preview_doc is None or not self._page_tops:
-            return
-        k = max(0, min(len(self._page_tops) - 1, self._preview_page + step))
-        self.canvas.yview_moveto((self._page_tops[k] - PAGE_GAP) / self._total_height())
-        self._render_visible()
-
-    def on_zoom(self, step):
-        if self._preview_doc is None:
-            return
-        if step is None:
-            self._zoom = None
-        else:
-            current = self._current_zoom()
-            if step > 0:
-                bigger = [z for z in ZOOM_STEPS if z > current + 0.01]
-                self._zoom = bigger[0] if bigger else ZOOM_STEPS[-1]
-            else:
-                smaller = [z for z in ZOOM_STEPS if z < current - 0.01]
-                self._zoom = smaller[-1] if smaller else ZOOM_STEPS[0]
-        self._layout_pages()

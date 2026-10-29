@@ -3,7 +3,10 @@
 VA Document の「印刷」画面（dialogs.PrintDialog）でプリンター・部数・ページを選んでもらい（2026-10-24 班長決定。
 Windows 11 の新しい印刷画面は、プレビューの欄に「このアプリは印刷プレビューをサポートしていません」と出て紛らわしいため、
 Windows の PrintDlgW をやめた。プリンターの細かい設定は［プロパティ］で、プリンターのドライバーの画面を開く）、組んだページ
-（確認表示と同じもの）をプリンターの解像度（最大 PRINT_MAX_DPI）の灰色の画像にして、実際のサイズで送る。
+（確認表示と同じもの）をプリンターの解像度（最大 PRINT_MAX_DPI）の画像にして、実際のサイズで送る。
+・字だけのページは灰色、画像のあるページはカラーにする（page_colorspace。2026-10-30 班長決定。それまではすべて灰色で、写真も
+  白黒で刷られた）。カラーのページは、灰色の3倍の大きさになるので、上から BAND_ROWS 行ずつに分けて送る（1ページを丸ごと
+  画像にすると、600 dpi で約 100 MB になるため）。印刷の画面の印刷プレビューも、同じ規則で色を決める。
 ・用紙は A4 にする（プリンターの既定が Letter などでも、字が切れないように）。
 ・印刷できない用紙の縁の分（PHYSICALOFFSET）を差し引き、用紙の左上にページの左上を合わせる。
 ・印刷の文書の名前（待ち行列に出る名前。Microsoft Print to PDF では PDF の題名になる）は、呼ぶ側が決める（画面では PDF のファイル名）。
@@ -15,6 +18,7 @@ import os
 import fitz  # PyMuPDF
 
 PRINT_MAX_DPI = 600
+BAND_ROWS = 1024        # カラーのページを分けて送るときの、1回の行の数（600 dpi で約 15 MB）
 
 if os.name == "nt":
     from ctypes import wintypes
@@ -39,6 +43,9 @@ if os.name == "nt":
 
     class BITMAPINFO_GRAY(ctypes.Structure):
         _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 256)]
+
+    class BITMAPINFO_RGB(ctypes.Structure):
+        _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 1)]
 
     _winspool.EnumPrintersW.argtypes = [wintypes.DWORD, wintypes.LPWSTR, wintypes.DWORD, ctypes.c_void_p,
                                         wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD)]
@@ -171,6 +178,42 @@ def parse_pages(spec, total):
     return sorted(chosen)
 
 
+def page_colorspace(page):
+    """ページを印刷する色：画像のあるページはカラー、字だけのページは灰色（2026-10-30 班長決定）。蛍光ペンと仮名化する語の
+    色は、印刷する PDF にはもともと入らない（preview_pdf の既定）。"""
+    return fitz.csRGB if page.get_images() else fitz.csGRAY
+
+
+def _draw_color_page(hdc, page, render_dpi, dpi_x, dpi_y, off_x, off_y):
+    """カラーのページを、上から BAND_ROWS 行ずつ画像にしてプリンターに描く（1ページを丸ごと画像にしないため）。
+    帯の位置は、帯の画像の位置（画素）から毎回計算する（丸めの差で、帯の間がすいたり重なったりしないように）。"""
+    zoom = render_dpi / 72
+    sx, sy = dpi_x / render_dpi, dpi_y / render_dpi
+    bmi = BITMAPINFO_RGB()
+    bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    bmi.bmiHeader.biPlanes, bmi.bmiHeader.biBitCount = 1, 24
+    rect = page.rect
+    rows = round(rect.height * zoom)
+    for r0 in range(0, rows, BAND_ROWS):
+        r1 = min(r0 + BAND_ROWS, rows)
+        clip = fitz.Rect(rect.x0, rect.y0 + r0 / zoom, rect.x1, rect.y0 + r1 / zoom)
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip, colorspace=fitz.csRGB, alpha=False)
+        data = bytearray(pix.samples)
+        data[0::3], data[2::3] = data[2::3], data[0::3]     # Windows の画像は、青・緑・赤の順
+        row = pix.width * 3
+        stride = (row + 3) & ~3                              # 1行のバイト数は 4 の倍数にする
+        if stride != row:
+            pad = b"\xff" * (stride - row)
+            data = b"".join(bytes(data[r * row:(r + 1) * row]) + pad for r in range(pix.height))
+        bmi.bmiHeader.biWidth = pix.width
+        bmi.bmiHeader.biHeight = -pix.height                # 上から下へ並ぶ画像
+        x0, y0 = round(pix.x * sx), round(pix.y * sy)
+        dest_w, dest_h = round((pix.x + pix.width) * sx) - x0, round((pix.y + pix.height) * sy) - y0
+        buf = ctypes.create_string_buffer(bytes(data), len(data))
+        _gdi32.StretchDIBits(hdc, x0 - off_x, y0 - off_y, dest_w, dest_h, 0, 0, pix.width, pix.height,
+                             buf, ctypes.byref(bmi), DIB_RGB_COLORS, SRCCOPY)
+
+
 def print_pdf(pdf_bytes, hdc, doc_name, pages=None, output=None, progress=None):
     """PDF（バイト列）の pages（0 から。None なら全部）を、hdc のプリンターに実際のサイズで印刷する。
 
@@ -202,6 +245,16 @@ def print_pdf(pdf_bytes, hdc, doc_name, pages=None, output=None, progress=None):
             try:
                 for k in chosen:
                     page = doc[k]
+                    if page_colorspace(page) is fitz.csRGB:
+                        if _gdi32.StartPage(hdc) <= 0:
+                            raise PrintError("ページを始められませんでした。")
+                        _draw_color_page(hdc, page, render_dpi, dpi_x, dpi_y, off_x, off_y)
+                        if _gdi32.EndPage(hdc) <= 0:
+                            raise PrintError("ページを送れませんでした。")
+                        done += 1
+                        if progress:
+                            progress(done, len(chosen))
+                        continue
                     pix = page.get_pixmap(dpi=render_dpi, colorspace=fitz.csGRAY, alpha=False)
                     stride = (pix.width + 3) & ~3          # 1行のバイト数は 4 の倍数にする
                     data = pix.samples
