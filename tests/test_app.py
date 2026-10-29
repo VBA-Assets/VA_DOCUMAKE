@@ -1313,6 +1313,58 @@ def test_heading_space_keys_reach_the_editor(window):
     assert _lines(window, 4, 4) == ["<<<"]
 
 
+def test_new_heading_follows_previous_heading_of_same_level(window):
+    """［見出し］・Alt+Shift+←／→ で見出しにした行には、直前の同じ段の見出しにならって、前の空行と見出し全体の太字を付ける。
+    付けるだけで外さない。Ctrl+Z 1回で、見出しにする前に戻る（2026-10-29 班長指示）。"""
+    def lines():
+        return window.raw_text().rstrip("\n").split("\n")
+    window.text.tag_remove("sel", "1.0", "end")
+    # 直前の ## は空行と太字の両方：［見出し］で両方が付く
+    window._load_text("# 第一\n本文。\n\n## **小一**\n本文。\n次の段落。")
+    window.text.mark_set("insert", "6.0")
+    window.on_paragraph_kind(HEADING_BUTTON_MARK)
+    assert lines()[4:] == ["本文。", "", "## **次の段落。**"]
+    window.text.edit_undo()
+    assert lines()[4:] == ["本文。", "次の段落。"]
+    # 太字だけ・空行だけ・どちらもなし
+    for prev, want in (("## **小一**", ["本文。", "## **次。**"]), ("\n## 小一", ["本文。", "", "## 次。"]),
+                       ("## 小一", ["本文。", "## 次。"])):
+        window._load_text(f"# 第一\n本文。\n{prev}\n本文。\n次。")
+        n = len(lines())
+        window.text.mark_set("insert", f"{n}.0")
+        window.on_paragraph_kind(HEADING_BUTTON_MARK)
+        assert lines()[-len(want):] == want, prev
+    # 段の違う見出しにはならわない。Alt+Shift+→ で ### にすると、直前の ### にならう
+    window._load_text("## **小一**\n本文。\n\n### 細一\n本文。\n次。")
+    window.text.mark_set("insert", "6.0")
+    window.on_outline(1)                                  # 本文を下げると直前の見出し（###）と同じ段
+    assert lines()[4:] == ["本文。", "", "### 次。"]
+    window.on_outline(-1)                                 # ## に上げると、直前の ## にならって太字。空行は外さない
+    assert lines()[4:] == ["本文。", "", "## **次。**"]
+    window.text.edit_undo()
+    assert lines()[4:] == ["本文。", "", "### 次。"]
+    # 直前の同じ段の見出しが上の段の見出しの直後（空けるかが表れない）なら、その前の同じ段の見出しを見る。
+    # 上の段の見出しの直後に見出しにした行には、空行を入れない（二重に空けない）
+    window._load_text("# 第一\n本文。\n\n## 小一\n本文。\n# 第二\n## 小二\n本文。\n次。\n# 第三\n小三")
+    window.text.mark_set("insert", "9.0")
+    window.on_paragraph_kind(HEADING_BUTTON_MARK)
+    assert lines()[6:10] == ["## 小二", "本文。", "", "## 次。"]
+    window.text.mark_set("insert", "12.0")
+    window.on_paragraph_kind(HEADING_BUTTON_MARK)
+    assert lines()[10:] == ["# 第三", "## 小三"]
+    # 一緒に見出しにした行にはならわず、その前の見出しにならう
+    window._load_text("前文。\n\n## **小一**\n本文。\n一。\n二。")
+    window.text.tag_add("sel", "5.0", "6.end")
+    window.on_paragraph_kind(HEADING_BUTTON_MARK)
+    window.text.tag_remove("sel", "1.0", "end")
+    assert lines()[3:] == ["本文。", "", "## **一。**", "## **二。**"]
+    # 字のない行を見出しにしたときは、空行を入れ、カーソルをその見出しの行末に置く（太字は字を打ってから）
+    window._load_text("本文。\n\n## **小一**\n本文。\n")
+    window.text.mark_set("insert", "5.0")
+    window.on_paragraph_kind(HEADING_BUTTON_MARK)
+    assert lines()[3:] == ["本文。", "", "## "] and window.text.index("insert") == "6.3"
+
+
 def test_marks_wrapped_in_bold_in_editor(window):
     """「**:=: 準備書面**」の記号も青く示し、［中央］で付け替えられる。AI の回答で太字に囲まれても、
     記号が消えたとはみなさない（2026-10-24 班長指示）。"""
@@ -2114,5 +2166,5 @@ def test_load_entries_asks_for_missing_pdf(window, tmp_path, monkeypatch):
     monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(a[1]) or True)
     monkeypatch.setattr(ai_ops, "LoadEntriesDialog", lambda parent, loaded: type("D", (), {"ok": True})())
     window.on_load_entries()
-    assert asked and "PDF を選びますか" in asked[0] and picked == ["仮名化した語を読み込むファイル", "PDF を選ぶ"]
+    assert asked and "PDF を選びますか" in asked[0] and picked == ["仮名化する語を読み込むファイル", "PDF を選ぶ"]
     assert window.session.dictionary.find("〔法人Ｘ〕").word == "乙山商事株式会社"

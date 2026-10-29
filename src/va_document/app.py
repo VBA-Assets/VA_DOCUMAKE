@@ -387,7 +387,7 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # 変える・解除する。画面を簡潔にし、仮名化の解除を手軽にしすぎないため。2026-10-27 班長指示）
         title_row = ttk.Frame(bottom)
         title_row.pack(anchor="w")
-        ttk.Label(title_row, text="仮名化した語").pack(side="left")
+        ttk.Label(title_row, text="仮名化する語").pack(side="left")
         ttk.Label(title_row, text="（ダブルクリックで編集）", style="Note.TLabel").pack(side="left")
         # 同じ案件のほかの文書（書式付きファイル・構文ファイル）から、仮名化した語を今の一覧に足す（2026-10-29 班長決定）
         ttk.Button(title_row, text="ファイルから読み込む", style="Small.TButton", command=self.on_load_entries

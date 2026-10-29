@@ -283,7 +283,7 @@ class FileMixin:
         unknown = list(dict.fromkeys(m.group(0) for m in TOKEN_RE.finditer(text)))
         if not unknown or allow_unknown:
             return text
-        if not messagebox.askyesno(APP_NAME, "仮名化した語にない記号があります（AI が作った記号など）：\n"
+        if not messagebox.askyesno(APP_NAME, "仮名化する語の一覧にない記号があります（AI が作った記号など）：\n"
                                    + "、".join(unknown) + "\n\nこのまま保存すると、PDF には記号のまま出ます。"
                                    "元の語が分かれば、エディターで直すか、元の語を選んで仮名化してください。\n"
                                    "このまま保存しますか？", parent=self):

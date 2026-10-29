@@ -163,7 +163,7 @@ class EditDialog(_Dialog, _TokenFields):
         # 文ごとに改行する（Tk の折り返しは行頭の禁則を守らず、「AI」の後の空白でも切れるため）
         ttk.Label(body, text="元の語を直すと、文章の中のこの記号は、すべて新しい語になります（誤字の訂正など）。\n"
                   "記号を変えると、エディターの記号も変わります（前の書面と記号をそろえるときなど）。\n"
-                  "AI の前の回答にある前の記号は、取り込むときに「仮名化した語にない記号」として知らせます。",
+                  "AI の前の回答にある前の記号は、取り込むときに「仮名化する語の一覧にない記号」として知らせます。",
                   style="Note.TLabel", justify="left").pack(anchor="w", pady=(8, 0))
         bar = self.buttons("変える", self.ok)
         # ［解除］は、［変える］［やめる］から離して左端に置く
@@ -286,12 +286,12 @@ class LoadEntriesDialog(_Dialog):
     記号の数を出す。ok が真なら読み込む。"""
 
     def __init__(self, parent, loaded):
-        super().__init__(parent, "仮名化した語を読み込む")
+        super().__init__(parent, "仮名化する語を読み込む")
         self.ok = False
         body = ttk.Frame(self, padding=(16, 14, 16, 4))
         body.pack(fill="both", expand=True)
         plan = loaded.plan
-        ttk.Label(body, text=f"次のファイルの文書から、仮名化した語を {len(plan.add)} 語読み込みます。\n"
+        ttk.Label(body, text=f"次のファイルの文書から、仮名化する語を {len(plan.add)} 語読み込みます。\n"
                              f"　{loaded.pdf_path.name}\n"
                              "この文書と同じ案件のファイルかを、確かめてください。",
                   justify="left", wraplength=520).pack(anchor="w")

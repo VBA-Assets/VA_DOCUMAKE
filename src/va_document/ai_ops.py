@@ -102,7 +102,7 @@ class AiMixin:
         一覧に足す（2026-10-29 班長決定。検討_仮名化した語の読み込み.md）。対応表は、開き直すときと同じく PDF と構文ファイルを
         突き合わせてメモリの中で作り直す（クリップボード・ファイルに出さない）。食い違いが1つでもあれば何も読み込まず、
         読み込む前に一覧を見せて確かめる。選んだファイルの場所は覚えない。"""
-        path = filedialog.askopenfilename(parent=self, title="仮名化した語を読み込むファイル",
+        path = filedialog.askopenfilename(parent=self, title="仮名化する語を読み込むファイル",
                                           filetypes=[("書式付きファイル・構文ファイル", f"*.pdf *{vamd.EXTENSION}"),
                                                      ("書式付きファイル（PDF）", "*.pdf"),
                                                      ("構文ファイル", f"*{vamd.EXTENSION}")])
@@ -115,7 +115,7 @@ class AiMixin:
                 msg = ("この書式付きファイル（PDF）の構文ファイルが、構文ファイルのフォルダに見つかりません。構文ファイルを選びますか？"
                        if e.kind == "vamd" else
                        "この構文ファイルの書式付きファイル（PDF）が、これまでに保存したフォルダに見つかりません。PDF を選びますか？")
-                if not messagebox.askyesno(APP_NAME, msg + "\n（仮名化した語は、PDF と構文ファイルの両方から作り直します）",
+                if not messagebox.askyesno(APP_NAME, msg + "\n（仮名化する語は、PDF と構文ファイルの両方から作り直します）",
                                            parent=self):
                     return
                 other = self.ask_other_file(e.kind)
@@ -133,7 +133,7 @@ class AiMixin:
         if plan.conflicts:
             lines = "\n".join("　" + why for _, why in plan.conflicts[:10])
             more = f"\n　ほか {len(plan.conflicts) - 10} 語" if len(plan.conflicts) > 10 else ""
-            messagebox.showwarning(APP_NAME, f"この文書の仮名化した語と食い違うため、読み込みませんでした（{loaded.pdf_path.name}）：\n"
+            messagebox.showwarning(APP_NAME, f"この文書の仮名化する語と食い違うため、読み込みませんでした（{loaded.pdf_path.name}）：\n"
                                    f"{lines}{more}\n\n同じ案件のファイルなら、この文書の一覧（ダブルクリックで編集）を直してから、"
                                    "もう一度読み込んでください。", parent=self)
             return
@@ -145,7 +145,7 @@ class AiMixin:
             return
         n = self.session.merge_entries(loaded)
         self._after_dictionary_change()     # エディターの読み込んだ語を、記号に置き換える
-        self.status.configure(text=f"{loaded.pdf_path.name} の文書から、仮名化した語を {n} 語読み込みました。")
+        self.status.configure(text=f"{loaded.pdf_path.name} の文書から、仮名化する語を {n} 語読み込みました。")
 
     def on_copy_vamd(self):
         """構文ファイルの中身をクリップボードに写す（直していれば、先に保存する）。"""
@@ -206,7 +206,7 @@ class AiMixin:
             self.text.see(f"{r.changed_lines[0] + 1}.0")
         problems = []
         if r.unknown_tokens:
-            problems.append("仮名化した語にない記号（記号のまま入れました）：" + "、".join(r.unknown_tokens))
+            problems.append("仮名化する語の一覧にない記号（記号のまま入れました）：" + "、".join(r.unknown_tokens))
         if r.lost_tokens:
             problems.append("前の文章にあって、なくなった記号：" + "、".join(r.lost_tokens))
         if r.lost_marks:
