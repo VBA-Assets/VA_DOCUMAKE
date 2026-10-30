@@ -505,10 +505,15 @@ def test_editor_and_preview_are_linked(window, monkeypatch):
     n = len(window._preview_doc)
     assert window.page_label.cget("text") == f"{n} / {n}"
     assert window.canvas.find_withtag("caret")
-    # 編集中のページ（最後のページ）を太線で囲む
-    frame = window.canvas.find_withtag("current_page")
-    assert len(frame) == 1
-    assert window.canvas.coords(frame[0])[1] < window._page_tops[n - 1] < window.canvas.coords(frame[0])[3]
+    # 用紙は欄の幅いっぱいで、左右の線はない。線は灰色でページの境目だけ（編集中のページの青い線もない）。文書の上下の
+    # 端に帯も線もない
+    assert window._page_x == 0 and window._page_size[0] == window.canvas.winfo_width()
+    canvas_items = window.canvas.find_all()
+    assert not any(window.canvas.itemcget(item, "outline") for item in canvas_items
+                   if window.canvas.type(item) == "rectangle")
+    borders = [window.canvas.coords(item)[1] for item in canvas_items if window.canvas.type(item) == "line"]
+    assert len(borders) == 2 * (n - 1) and 0 < min(borders) and max(borders) < window._total_height()
+    assert window._page_tops[0] == 0 and window._total_height() == window._page_tops[-1] + window._page_size[1]
     # 確認表示の字をクリックすると、エディターのカーソルがその字へ動く
     line = last - 3
     col = len(text.splitlines()[line]) - 2     # 本文の字（行頭の「##」などの記号の上ではない）
@@ -2179,6 +2184,350 @@ def test_image_button_inserts_line_and_undo(window, tmp_path, monkeypatch):
     assert str(good) not in json.dumps(window.cfg.__dict__, ensure_ascii=False, default=str)   # 場所を覚えない
     window.text.edit_undo()
     assert "[IMAGE" not in window.raw_text()
+
+
+def _text_lines(window):
+    return window.raw_text().split("\n")
+
+
+def test_insert_table(window):
+    """［表］：入力画面なしで、カーソルの行の次に2列3行の空の表が入り、カーソルが最初のセルに来る。字を打てば確認表示に
+    出る。Ctrl+Z 1回で戻る。"""
+    from tkinter import ttk
+    from va_document.document import TABLE
+    assert "表" in {str(b.cget("text")) for b in _widgets(window, ttk.Button)}
+    window.text.mark_set("insert", "4.3")
+    window.on_table()
+    assert _text_lines(window)[3:8] == [PSEUDO.split("\n")[3], "|  |  |", "|---|---|", "|  |  |", "|  |  |"]
+    assert window.text.index("insert") == "5.2"
+    window.text.insert("insert", "項目")
+    window.refresh()
+    assert any(p.kind == TABLE for p in window.session.layout_map.paras)
+    assert "項目" in "".join(p.get_text() for p in window._preview_doc)
+    window.text.edit_undo()
+    window.text.edit_undo()
+    assert window.raw_text() == PSEUDO
+
+
+@pytest.mark.parametrize("text, cursor, expected", [
+    ("本文\n\n本文", "2.0", ["本文", "H", "S", "H", "H", "本文"]),                         # 空の行はその行に入れる
+    ("本文\n", "2.0", ["本文", "H", "S", "H", "H", ""]),                                  # 文書の最後は、後ろに空の行
+    ("| a |\n|---|\n| b |\n本文", "1.0", ["| a |", "|---|", "| b |", "", "H", "S", "H", "H", "本文"]),  # 表の中なら表の後
+    ("| a |\n|---|\n\n本文", "3.0", ["| a |", "|---|", "", "H", "S", "H", "H", "本文"]),  # 前が表の空の行は残す
+    ("本文\n\n| a |\n|---|", "2.0", ["本文", "H", "S", "H", "H", "", "| a |", "|---|"]),  # 後が表の空の行も残す
+    ("本文\n| a |\n|---|", "1.0", ["本文", "H", "S", "H", "H", "", "| a |", "|---|"]),    # 表の直前の行
+    ("| a |\n|---|\n\n| b |\n|---|", "3.0",
+     ["| a |", "|---|", "", "H", "S", "H", "H", "", "| b |", "|---|"]),                   # 表の間
+])
+def test_insert_table_keeps_tables_apart(window, text, cursor, expected):
+    """表が隣の表とつながらないよう、間に空の行を置く（| の行が続くと1つの表になるため）。"""
+    from va_document.document import TABLE, parse
+    from va_document.table_ops import table_lines
+    window._load_text(text)
+    window.text.mark_set("insert", cursor)
+    first = window._insert_block(table_lines(2, 3))
+    assert _text_lines(window) == [{"H": "|  |  |", "S": "|---|---|"}.get(x, x) for x in expected]
+    assert window._line(first) == "|  |  |" and window._line(first + 1) == "|---|---|"
+    tables = sum(p.kind == TABLE for p in parse(_text_lines(window), window.session.doc_type))
+    assert tables == 1 + text.count("|---|")
+
+
+def _in_table(window, cursor="4.3"):
+    window._load_text("本文\n| 項目 | 金額 |\n|---|---:|\n| 休業 | 100 |\n| 通院 | 200 |\n本文\n")
+    window.text.mark_set("insert", cursor)
+
+
+def test_table_menu_only_in_table(window, monkeypatch):
+    """表の中の［表］は表を入れず、メニューを出す。2重線の項目の字は、今の線で変わる。"""
+    posted = []
+    monkeypatch.setattr(window, "_post_table_menu", lambda span: posted.append(span))
+    _in_table(window)
+    before = window.raw_text()
+    window.on_table()
+    assert posted == [(2, 5)] and window.raw_text() == before
+    assert [x[0] for x in window._table_menu_items((2, 5))] == ["右に列を足す", "見出しの下を2重線にする"]
+    window.on_table_double()
+    assert window._line(3) == "|===|===:|"
+    assert [x[0] for x in window._table_menu_items((2, 5))][1] == "見出しの下を1重線に戻す"
+    window.on_table_double()
+    assert window._line(3) == "|---|---:|"
+    window.text.edit_undo()
+    assert window._line(3) == "|===|===:|"
+
+
+def test_table_add_column(window):
+    """カーソルのセルの右に列を足す。Ctrl+Z 1回で戻る。2重線の表には = で足す。"""
+    from va_document.document import parse_table
+    _in_table(window, "4.3")
+    window.on_table_column()
+    assert window._line(2) == "| 項目 |  | 金額 |" and window._line(3) == "|---|---|---:|"
+    assert window._line(4) == "| 休業 |  | 100 |" and window._line(5) == "| 通院 |  | 200 |"
+    assert window._cursor() == (4, 7)
+    assert len(parse_table([window._line(k) for k in range(2, 6)]).header) == 3
+    window.text.edit_undo()
+    assert window._line(2) == "| 項目 | 金額 |"
+    window.on_table_double()
+    window.text.mark_set("insert", "4.10")      # 最後の列
+    window.on_table_column()
+    assert window._line(3) == "|===|===:|===|" and window._line(4) == "| 休業 | 100 |  |"
+
+
+@pytest.mark.parametrize("cursor, row, added", [
+    ("2.3", 4, True), ("3.1", 4, True), ("4.3", 5, True), ("5.3", 6, True),   # 見出し・区切りの行では区切りの行の下に
+    ("4.0", 5, True), ("4.100", 5, True),                                     # 表の途中の行は、行の外側でも足す
+    ("2.0", None, False), ("5.100", None, False),                             # 表の前・後に行を入れるのは、ふつうの改行
+    ("1.1", None, False), ("6.1", None, False),                               # 表の外
+])
+def test_table_enter_adds_row(window, cursor, row, added):
+    _in_table(window, cursor)
+    before = window.raw_text()
+    if added:
+        assert window.on_editor_return() == "break"
+        assert window._line(row) == "|  |  |" and window._cursor() == (row, 2)
+        assert window._table_range(row) == (2, 6)
+        window.text.edit_undo()
+        assert window.raw_text() == before
+    else:
+        assert window.on_editor_return() is None and window.raw_text() == before
+
+
+def test_table_enter_with_selection_is_ordinary(window):
+    _in_table(window)
+    window.text.tag_add("sel", "4.2", "4.4")
+    assert window.on_editor_return() is None
+
+
+def test_table_tab_moves_between_cells(window):
+    """Tab で次のセル、Shift+Tab で前のセルへ。区切りの行は飛ばす。最後のセルの Tab は行を足す。表の外はタブのまま。"""
+    _in_table(window, "2.3")
+    seen = []
+    for _ in range(4):
+        assert window.on_table_tab() == "break"
+        seen.append(window.text.get("insert linestart", "insert"))
+    assert seen == ["| 項目 | 金額", "| 休業", "| 休業 | 100", "| 通院"]
+    window.text.mark_set("insert", "5.9")
+    assert window.on_table_tab() == "break"
+    assert window._line(6) == "|  |  |" and window._cursor() == (6, 2)
+    assert window._table_range(6) == (2, 6)
+    assert window.on_table_tab(-1) == "break" and window.text.get("insert linestart", "insert") == "| 通院 | 200"
+    window.text.mark_set("insert", "2.3")
+    assert window.on_table_tab(-1) == "break" and window._cursor() == (2, 3)        # 最初のセルより前には動かない
+    window.text.mark_set("insert", "1.1")
+    assert window.on_table_tab() is None
+
+
+def test_table_keys_reach_the_editor(window, monkeypatch):
+    """実際の Enter・Tab・Shift+Tab・Ctrl+Shift+V のキーで働く。表の外の Tab はタブの字を入れる。"""
+    _focus_editor(window)
+    _in_table(window, "4.3")
+    window.text.event_generate("<Return>")
+    assert window._line(5) == "|  |  |" and window._cursor() == (5, 2)
+    window.text.event_generate("<Tab>")
+    assert window._cursor() == (5, 5)
+    window.text.event_generate("<Shift-Tab>")
+    assert window._cursor() == (5, 2)
+    window.text.mark_set("insert", "1.2")
+    window.text.event_generate("<Tab>")
+    assert window._line(1) == "本文\t"
+    monkeypatch.setattr(window, "clipboard_text", lambda: "字\t字\n字\t字")
+    window.text.event_generate("<Control-Shift-Key-V>")
+    assert window._line(1) == "本文\t字\t字" and window._line(2) == "字\t字"
+
+
+def test_table_tab_moves_to_blank_cell(window):
+    """字のないセルは、空白の間にカーソルを置く（打つと「| 字 |」になる）。"""
+    window._load_text("")
+    window.on_table()
+    window.on_table_tab()
+    assert window._cursor() == (1, 5)
+    window.text.insert("insert", "金額")
+    assert window._line(1) == "|  | 金額 |"
+
+
+def test_paste_excel_table(window, monkeypatch):
+    """Ctrl+V：表のコピーは、カーソルの行の次に表として貼る（仮名化した語は記号に）。Ctrl+Z 1回で戻る。
+    Ctrl+Shift+V は字のまま貼る。"""
+    monkeypatch.setattr(window, "clipboard_text", lambda: "氏名\t金額\r\n甲野太郎\t1,080,000\r\nA|B\t\r\n")
+    window.text.mark_set("insert", "4.2")
+    assert window._on_paste() == "break"
+    assert _text_lines(window)[3:8] == [PSEUDO.split("\n")[3], "| 氏名 | 金額 |", "|---|---|",
+                                   "| 〔人名Ａ〕 | 1,080,000 |", "| A\\|B |  |"]
+    window.text.edit_undo()
+    assert window.raw_text() == PSEUDO
+    window.text.mark_set("insert", "4.2")
+    assert window.on_paste_plain() == "break"
+    assert "氏名\t金額" in window.raw_text() and "〔人名Ａ〕\t1,080,000" in window.raw_text() and "|---|" not in window.raw_text()
+    window.text.edit_undo()
+    assert window.raw_text() == PSEUDO
+
+
+def _image_line(window, width=12, lead=":-: "):
+    n = window.session.add_picture(_picture(), window.raw_text())
+    window.text.insert("end", f"{lead}[IMAGE {n}]{{{width}}}\n")
+    line = int(window.text.index("end-1c").split(".")[0]) - 1
+    window.text.mark_set("insert", f"{line}.2")
+    return n, line
+
+
+def test_image_button_on_image_line_opens_menu(window, monkeypatch):
+    """画像の行の［画像］は、ファイルを選ばずメニューを出す。データのない画像には「元の大きさ」を出さない。"""
+    from va_document import image_ops
+    posted = []
+    monkeypatch.setattr(window, "_post_image_menu", posted.append)
+    monkeypatch.setattr(image_ops.filedialog, "askopenfilenames", lambda **k: pytest.fail("ファイルを選ばない"))
+    n, _ = _image_line(window)
+    window.on_image()
+    assert posted == [n]
+    assert [x[0] for x in window._image_menu_items(n)] == ["別の画像に差し替える", "元の大きさにする", "本文の幅いっぱいにする"]
+    assert [x[0] for x in window._image_menu_items(99)] == ["別の画像に差し替える", "本文の幅いっぱいにする"]
+
+
+def test_image_replace_keeps_width_and_align(window, tmp_path, monkeypatch):
+    """差し替え：幅と配置はそのままで番号が替わり、Ctrl+Z 1回で元の画像に戻る。読めないファイル・やめたときは替わらない。"""
+    from va_document import image_ops
+    n, line = _image_line(window)
+    good, bad = tmp_path / "新.png", tmp_path / "メモ.txt"
+    good.write_bytes(__import__("base64").b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAEElEQVR4nGP4z8DAwMDAAAAN+gH/4oXbOAAAAABJRU5ErkJggg=="))
+    bad.write_text("画像ではない", encoding="utf-8")
+    errors = []
+    monkeypatch.setattr(image_ops.messagebox, "showerror", lambda *a, **k: errors.append(a[1]))
+    before = window.raw_text()
+    for path in ("", str(bad)):
+        monkeypatch.setattr(image_ops.filedialog, "askopenfilename", lambda **k: path)
+        window.on_image_replace()
+        assert window.raw_text() == before
+    assert len(errors) == 1 and "読めない" in errors[0]
+    monkeypatch.setattr(image_ops.filedialog, "askopenfilename", lambda **k: str(good))
+    window.on_image_replace()
+    assert window._line(line) == f":-: [IMAGE {n + 1}]{{12}}"
+    assert window.session.images[n + 1].size == (2, 1) and window.session.images[n].size == (400, 300)
+    assert [p.number for p in window.session.layout_map.ts.images] == [n + 1]
+    window.text.edit_undo()
+    assert window.raw_text() == before
+    assert str(good) not in json.dumps(window.cfg.__dict__, ensure_ascii=False, default=str)   # 場所を覚えない
+
+
+def test_image_replace_fills_missing_image(window, tmp_path, monkeypatch):
+    """データのない画像の行も差し替えられ、番号の知らせが消える。"""
+    from va_document import image_ops
+    window.text.insert("end", "--: [IMAGE 7]{9}\n")
+    window.text.mark_set("insert", "5.0")
+    path = tmp_path / "新.png"
+    path.write_bytes(__import__("base64").b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAEElEQVR4nGP4z8DAwMDAAAAN+gH/4oXbOAAAAABJRU5ErkJggg=="))
+    monkeypatch.setattr(image_ops.filedialog, "askopenfilename", lambda **k: str(path))
+    window.on_image_replace()
+    assert window._line(5) == "--: [IMAGE 8]{9}" and window.session.missing_images(window.raw_text()) == []
+
+
+def test_image_width_items(window):
+    """幅のメニュー：元の大きさは入れたときの字数、いっぱいは1行の字数。組むときは置ける幅に収まる。Ctrl+Z 1回で戻る。"""
+    n, line = _image_line(window, width=12, lead="")
+    chars = window.session.doc_type.chars_lines[0]
+    natural = window._natural_width(window.session.images[n])
+    window.on_image_full_width()
+    assert window._line(line) == f"[IMAGE {n}]{{{chars}}}"
+    piece = window.session.layout_map.ts.images[0]
+    assert piece.x + piece.w <= window.session.layout_map.ts.text_w + window.session.layout_map.ts.margin_left + 0.01
+    window.on_image_natural_width()
+    assert window._line(line) == f"[IMAGE {n}]{{{natural}}}"
+    window.text.edit_undo()
+    assert window._line(line) == f"[IMAGE {n}]{{{chars}}}"
+    window.text.edit_undo()
+    assert window._line(line) == f"[IMAGE {n}]{{12}}"
+
+
+def test_image_width_without_braces_and_lowercase(window):
+    """幅を省いた行・小文字の記号も書き換えられる。"""
+    window.text.insert("end", "[image 3]\n")
+    window.text.mark_set("insert", "5.0")
+    window.on_image_full_width()
+    assert window._line(5) == f"[IMAGE 3]{{{window.session.doc_type.chars_lines[0]}}}"
+
+
+def test_paste_word_formats(window, monkeypatch):
+    """Ctrl+V：Word の書式を記号にして貼る。行の途中では配置の記号を付けない。Ctrl+Z 1回で戻る。Ctrl+Shift+V は字だけ。"""
+    from va_document import html_paste
+    from test_html_paste import cf_html
+    data = cf_html("<p align=center style='text-align:center'><b>甲野太郎</b>の主張</p><p>次の行</p>")
+    monkeypatch.setattr(html_paste, "read_html", lambda: data)
+    monkeypatch.setattr(window, "clipboard_text", lambda: "甲野太郎の主張\n次の行")
+    window.text.mark_set("insert", "end-1c")
+    assert window._on_paste() == "break"
+    assert _text_lines(window)[4:6] == [":-: **〔人名Ａ〕**の主張", "次の行"]
+    window.text.edit_undo()
+    assert window.raw_text() == PSEUDO
+    window.text.mark_set("insert", "4.1")
+    assert window._on_paste() == "break"
+    assert window._line(4).endswith("**〔人名Ａ〕**の主張") and ":-:" not in window._line(4)
+    window.text.edit_undo()
+    window.text.mark_set("insert", "end-1c")
+    window.on_paste_plain()
+    assert _text_lines(window)[4:6] == ["〔人名Ａ〕の主張", "次の行"]
+
+
+def test_paste_browser_formats(window, monkeypatch):
+    """Ctrl+V：ブラウザーの書式も記号にして貼る。Ctrl+Shift+V は字だけ。"""
+    from va_document import html_paste
+    from test_html_paste import browser_html
+    data = browser_html('<p style="font-weight: 400"><strong>甲野太郎</strong>の主張</p><p style="text-align: right">次の行</p>')
+    monkeypatch.setattr(html_paste, "read_html", lambda: data)
+    monkeypatch.setattr(window, "clipboard_text", lambda: "甲野太郎の主張\n\n次の行")
+    window.text.mark_set("insert", "end-1c")
+    assert window._on_paste() == "break"
+    assert _text_lines(window)[4:7] == ["**〔人名Ａ〕**の主張", "", "--: 次の行"]
+    window.text.edit_undo()
+    assert window.raw_text() == PSEUDO
+    window.text.mark_set("insert", "end-1c")
+    window.on_paste_plain()
+    assert _text_lines(window)[4:7] == ["〔人名Ａ〕の主張", "", "次の行"]
+
+
+def test_paste_word_table_is_placed_like_table(window, monkeypatch):
+    from va_document import html_paste
+    from test_html_paste import cf_html
+    data = cf_html("<table><tr><td><p><b>項目</b></p></td><td><p>金額</p></td></tr>"
+                   "<tr><td><p>休業</p></td><td><p align=right>100</p></td></tr></table>")
+    monkeypatch.setattr(html_paste, "read_html", lambda: data)
+    monkeypatch.setattr(window, "clipboard_text", lambda: "項目\t金額\n休業\t100\n")
+    window.text.mark_set("insert", "4.1")
+    assert window._on_paste() == "break"
+    assert _text_lines(window)[4:7] == ["| **項目** | 金額 |", "|---|---|", "| 休業 | --: 100 |"]
+
+
+def test_paste_plain_replaces_selection_in_one_undo(window, monkeypatch):
+    monkeypatch.setattr(window, "clipboard_text", lambda: "字\t字")
+    window.text.tag_add("sel", "4.0", "4.3")
+    window.text.mark_set("insert", "4.3")
+    window.on_paste_plain()
+    assert window._line(4).startswith("字\t字")
+    window.text.edit_undo()
+    assert window.raw_text() == PSEUDO
+
+
+@pytest.mark.parametrize("clip, is_table", [
+    ("a\tb\nc\td\n", True),
+    ("a\tb\tc", False),                     # 1行だけ
+    ("a\nb\n", False),                      # タブがない
+    ("a\tb\nc\n", False),                   # タブの数がそろわない
+    ("a\tb\n\nc\td\n", False),              # 空の行がある
+    ('A\t"x\ny"\tC\n', False),              # セルの中の改行（Excel は " で囲む）
+    ('"甲"\tb\nc\td\n', True),              # 字としての " は、両端にあれば残す
+])
+def test_clipboard_table(clip, is_table):
+    from va_document.table_ops import clipboard_table
+    assert (clipboard_table(clip) is not None) == is_table
+
+
+def test_empty_table_goes_through_save(window, tmp_path):
+    """空のセルのある表でも、組む・保存するが通る。"""
+    window.text.mark_set("insert", "end")
+    window.on_table()
+    window.refresh()
+    window.update()
+    window.session.pdf_path = tmp_path / "準備書面.pdf"
+    assert window.on_save() and window.session.version == 1
 
 
 def test_paste_image_from_clipboard(window, monkeypatch):

@@ -1,7 +1,7 @@
 """VA Documentの画面（tkinter・ttk。仕様.md の4）。
 
-・画面のまとめ役。部品（mixin）を混ぜて使う：エディターの操作（editor_ops.py。カーソルの上の ▼ は editor_mark.py、表のセルは
-  table_ops.py）、確認表示（preview.py）、
+・画面のまとめ役。部品（mixin）を混ぜて使う：エディターの操作（editor_ops.py。カーソルの上の ▼ は editor_mark.py、表の挿入と
+  表のセルは table_ops.py）、確認表示（preview.py）、
   ファイルの操作（file_ops.py：開く・保存・閉じる・印刷）、AI 連携（ai_ops.py：仮名化・コピー・取り込み）。
 ・エディターは常に仮名（記号）で表示し、実名は確認表示で見る（2026-10-24 班長決定）。
 ・確認表示は、組んだ PDF（メモリの中で作る）のページを画像にして表示する。文章を一時ファイルに書かない。
@@ -208,6 +208,13 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         # 見出しの行を選んで Enter を押すと、同じ段の見出しの前の空行をそろえる（2026-10-28 班長決定。
         # editor_ops.on_editor_return。Ctrl+Enter〔改ページ〕は上で受けるので、ここには来ない）
         self.text.bind("<Return>", self.on_editor_return)
+        # 表の中の Tab・Shift+Tab は、次・前のセルへ動く（2026-10-31 班長決定。table_ops.on_table_tab）
+        self.text.bind("<Tab>", lambda e: self.on_table_tab(1))
+        self.text.bind("<Shift-Tab>", lambda e: self.on_table_tab(-1))
+        # Ctrl+Shift+V は、表にせず字のまま貼る（2026-10-31 班長決定）
+        for mod in mods:
+            for k in ("v", "V"):
+                self.text.bind(f"<{mod}-Shift-Key-{k}>", lambda e: self.on_paste_plain())
         self.text.bind("<Alt-Shift-Left>", lambda e: (self.on_outline(-1), "break")[1])
         self.text.bind("<Alt-Shift-Right>", lambda e: (self.on_outline(1), "break")[1])
         for seq in ("<Control-Shift-Key-N>", "<Control-Shift-Key-n>"):
@@ -360,9 +367,12 @@ class MainWindow(EditorMixin, PreviewMixin, FileMixin, AiMixin, tk.Tk):
         for label, mark in (("改ページ", PAGE_BREAK_MARK), ("セクション区切り", SECTION_BREAK_MARK),
                             ("目次", TOC_MARK)):   # 載せる見出しのレベルは手で直す（2026-10-24）
             g.small(label, lambda m=mark: self.on_line_mark(m))
+        # ［表］：空の表（マークダウンの表）を入れる。表の中で押すと、列の追加などのメニューを出す。Excel・Word の表の
+        # コピーは Ctrl+V で表になる（2026-10-31 班長決定）
+        self.table_button = g.small("表", self.on_table)
         # ［画像］：画像ファイルを選んで [IMAGE n]{幅} の行を入れる。クリップボードの画像は Ctrl+V（Win+V も）で入れる
-        # （2026-10-29 班長決定）
-        g.small("画像", self.on_image)
+        # （2026-10-29 班長決定）。画像の行で押すと、差し替え・幅のメニューを出す（2026-10-31 班長決定）
+        self.image_button = g.small("画像", self.on_image)
         # 見出しの前の空行は、ボタンを置かず、見出しの行を選んで Enter を押して同じ段にそろえる（2026-10-28 班長決定）
         # 検索・置換は「編集」の組にする（Word のリボンのホームのタブと同じ名前。2026-10-23 班長決定）
         g = rb.group("編集")

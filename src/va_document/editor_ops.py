@@ -8,7 +8,7 @@ import math
 import re
 import tkinter as tk
 
-from . import vamd
+from . import html_paste, vamd
 from .document import (ALIGN_MARKS, BLANK, BULLET, BULLET_MARK, CELL_ALIGN_RE, CENTER_MARK, DISTRIBUTE_CLOSE_RE, DISTRIBUTE_OPEN,
                        HEADING, HEADING_BUTTON_MARK, HEADING_MARK_RE,
                        LEFT_INDENT_MARK, LIST_MARK_RE, NUMBER, NUMBER_MARK, PAGE_BREAK, RIGHT_MARK, SECTION_BREAK,
@@ -333,10 +333,11 @@ class EditorMixin(EditorMarkMixin, TableCellMixin, ImageMixin):
 
     def on_editor_return(self, event=None):
         """エディターの Enter。見出しの行全体（または見出しの字すべて）を選んで押したら、見出しの前の空行を入れる
-        （その段と上の段）・外す（その段と下の段）。"break" を返す。そうでなければ None（エディターのもとの働きのまま）。"""
+        （その段と上の段）・外す（その段と下の段）。"break" を返す。表の中は、行を足す（table_ops）。そうでなければ None
+        （エディターのもとの働きのまま）。"""
         line = self._selected_heading_line()
         if line is None:
-            return None
+            return self.on_table_return()
         self._heading_space(line)
         return "break"
 
@@ -732,21 +733,60 @@ class EditorMixin(EditorMarkMixin, TableCellMixin, ImageMixin):
     def _on_paste(self, event=None):
         """貼り付け（Ctrl+V）は、仮名化した語を記号に置き換えて貼る（エディターは常に仮名。2026-10-24）。
         クリップボードに字がなく画像だけがあれば、画像を入れる（Win+V で選んだ画像も、Windows が置き直してから Ctrl+V を
-        送るので、ここを通る。字と画像の両方があれば〔Excel・Word からのコピー〕、今までどおり字を貼る。2026-10-29 班長決定）。"""
+        送るので、ここを通る。字と画像の両方があれば〔Excel・Word からのコピー〕、今までどおり字を貼る。2026-10-29 班長決定）。
+        字が Excel・Word の表のコピーなら、表として貼る（table_ops）。Word・ブラウザーの書式（太字・傍点・蛍光ペン・配置）は、
+        記号にして残す（html_paste。2026-10-31 班長決定）。"""
         clip = self.clipboard_text()
         if not clip:
             return "break" if self.paste_pictures() else None
-        spans = self.session.dictionary.spans(clip)
-        if not spans:
+        if self.paste_html(clip) or self.paste_table(clip):
+            return "break"
+        if not self.session.dictionary.spans(clip):
             return None
-        try:
-            self.text.delete("sel.first", "sel.last")
-        except tk.TclError:
-            pass
-        self.text.insert("insert", self.session.dictionary.pseudonymize(clip))
-        self.text.see("insert")
-        self.status.configure(text=f"貼り付けた文章の仮名化する語 {len(spans)} か所を、記号に置き換えました。")
+        self._paste_text(clip)
         return "break"
+
+    def paste_html(self, clip):
+        """Word・ブラウザーからコピーした書式付きの字を、書式を記号にして貼る。貼ったら True。字はプレーンな字（clip）のまま変えず、
+        書式を読めないときは False（呼ぶ側が、これまでどおりに貼る）。行の途中に貼るときは、1行目に配置の記号を付けない。"""
+        data = html_paste.read_html()
+        if not data:
+            return False
+        blank = not self._sel_range() and not self.text.get("insert linestart", "insert lineend").strip()
+        lines = html_paste.convert(data, clip, self.session.dictionary, first_align=blank)
+        if lines is None:
+            return False
+        with undoable(self.text):
+            if self._sel_range():
+                self.text.delete("sel.first", "sel.last")
+            if any(is_table_line(line) for line in lines):
+                first = self._insert_block(lines)
+                self.text.mark_set("insert", f"{first + len(lines) - 1}.end")
+            else:
+                self.text.insert("insert", "\n".join(lines))
+        self.text.see("insert")
+        self.status.configure(text="書式を記号にして貼りました。Ctrl+Z で戻し、Ctrl+Shift+V で字のまま貼れます。")
+        return True
+
+    def on_paste_plain(self):
+        """Ctrl+Shift+V：表にせず、字のまま貼る（仮名化した語は Ctrl+V と同じく記号に置き換える。2026-10-31 班長決定）。"""
+        clip = self.clipboard_text()
+        if clip:
+            self._paste_text(clip)
+        return "break"
+
+    def _paste_text(self, clip):
+        """クリップボードの字を、仮名化した語を記号に置き換えて貼る。"""
+        spans = self.session.dictionary.spans(clip)
+        with undoable(self.text):
+            try:
+                self.text.delete("sel.first", "sel.last")
+            except tk.TclError:
+                pass
+            self.text.insert("insert", self.session.dictionary.pseudonymize(clip))
+        self.text.see("insert")
+        if spans:
+            self.status.configure(text=f"貼り付けた文章の仮名化する語 {len(spans)} か所を、記号に置き換えました。")
 
 
 # 表の行の、セルの先頭の配置の記号（| の後。太字・蛍光ペンの記号の内側にあってもよい）。group(2) が配置の記号

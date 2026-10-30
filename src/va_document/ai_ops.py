@@ -216,6 +216,9 @@ class AiMixin:
                             + "、".join(f"[IMAGE {n}]" for n in r.unknown_images))
         if r.added_images:
             problems.append("増えた画像の行（同じ画像を2か所に置きます）：" + "、".join(f"[IMAGE {n}]" for n in r.added_images))
+        if r.footnotes:
+            problems.append("脚注の記号（VA Documentは脚注を組めないため、記号は字のまま PDF に出ます。"
+                            "本文の括弧書きなどに直してください）：" + "、".join(r.footnotes))
         if r.removed:
             restored = [self.session.dictionary.restore(ln)[0] for ln in r.removed]
             more = f"\n　ほか {len(restored) - 10} 段落" if len(restored) > 10 else ""

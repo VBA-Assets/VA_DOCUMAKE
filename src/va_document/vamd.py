@@ -30,6 +30,9 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 # AI の画面が回答のコードブロックに混ぜる、内部の目印の行（2026-10-25 の往復試験で claude.ai が「<?thinking_complete?>」を
 # 混ぜた）。取り込むときに除き、除いたことを知らせる（2026-10-25 班長決定）
 AI_MARKER_RE = re.compile(r"^\s*<\?[A-Za-z_][\w:.-]*\?>\s*$")
+# マークダウンの脚注の記号（本文の [^1] と、行頭の [^1]: の両方）。VA Documentは脚注を組まず、字のまま PDF に出すので、
+# AI の回答で増えたら知らせる（2026-10-30 班長決定。仕様.md の13）
+FOOTNOTE_RE = re.compile(r"\[\^[^\[\]\s]+\]")
 
 
 PROMPT = """このファイルは、ツール「VA Document」の構文ファイル（AI に渡すために、実名を記号に置き換えたもの）である。「==== VA Document」で始まる区切りの行より上は AI への指示、下は編集する文書である。
@@ -52,7 +55,7 @@ VA Documentに取り込ませるだけで、実名に戻った文書が正しい
 ・空行を入れない。元の文書にある空の行は、そのまま残す（空の行は、PDF で1行の空きになる）。ただし、元の文書で、同じ階層（# の数が同じ）の見出しの前に空の行を置いているときは、新しく書くその階層の見出しの前にも、空の行を1行置く（文書の先頭、<<< <<<= の直後、直前が空の行・見出しのときを除く）。
 ・見出しは # の数で階層を表す（# が第１、## が１、### が(1)…）。見出しに番号を書かない。# だけの行のすぐ後に見出しを書くと、2つの見出しを1行にまとめる（「第１　１　当事者」。複合見出し）。表題・日付・宛先など、最初の見出しより前の行には # を付けない。
 ・表は、| で列を区切るマークダウンの表で書く。2行目の - = : や、セルの先頭の配置の記号は、私が求めたときを除き、変えない。見出しの行の下を2重線にするときは、2行目のすべての列の - を = にする（|===|===|）。
-・太字は **語**、傍点は *語* で書く（太字と傍点を重ねると ***語***）。元の文書の太字・傍点の記号は残し、新しく付けるのは、私が求めたときだけとする。蛍光ペンの記号（==語==）と均等割付の記号（[語]{5}）は、私が求めたときを除き、付け外ししない。斜体・水平線・引用・リンク・HTML タグを使わない。1つの段落は1行に書き、段落の途中で改行しない。
+・太字は **語**、傍点は *語* で書く（太字と傍点を重ねると ***語***）。元の文書の太字・傍点の記号は残し、新しく付けるのは、私が求めたときだけとする。蛍光ペンの記号（==語==）と均等割付の記号（[語]{5}）は、私が求めたときを除き、付け外ししない。斜体・水平線・引用・リンク・脚注（[^1]）・HTML タグを使わない。1つの段落は1行に書き、段落の途中で改行しない。
 ・依頼が文書の書き直しである場合は、依頼した箇所以外の文字を変えない（要約・言い換えをしない）。
 最終状態：回答を VA Documentに取り込むと、記号がすべて実名に戻り、配置と見出しの階層が元の文書と同じに保たれている。
 
@@ -82,10 +85,11 @@ PREVIOUS_PROMPTS = {
     "96b017a0e4bf85cd49fb98852783e4b5cfd613c7aeb8598989c6be0857f81bb5",   # Ver250 の作業中（画像の記号を足した。配っていない）
     "426b6612795fb86f8a3d7e9644b51f436302cbf3f25e4fc6bc067ed640fb7431",   # Ver250 の作業中（「別の事件の文書」を「別の案件の文書」に。配っていない）
     "07968024fdfab1024ba0412d5d5ff17addad8cf274fb251832180f2079799136",   # Ver250 の作業中（書き出しをツールの働きだけを書く形に。配っていない）
+    "42dc03c59fe3b3c0e097f1cc75daf78205668925ab397f6644b9405f49d8b85f",   # Ver250〜Ver261
 }
 # 今の版の既定の指示の SHA-256。PROMPT を直すと試験（test_vamd）が落ちるので、そのときは、この値を PREVIOUS_PROMPTS に
 # 移してから、新しい値に替える（前の版の登録を忘れないため。2026-10-28）
-PROMPT_SHA256 = "42dc03c59fe3b3c0e097f1cc75daf78205668925ab397f6644b9405f49d8b85f"   # Ver250〜（書き出しをツールの働きだけを書く形に改め、「依頼者などの実名」を「人や会社の実名」に、冒頭の「です」を「である」に改めた。2026-10-29 班長決定）
+PROMPT_SHA256 = "76f170703112e448098019159435667c5dd44d9091d8f9cb73c01f16419c3cf4"   # Ver270〜（使わない記法に脚注を足した。2026-10-30 班長決定）
 
 
 def is_default_prompt(prompt):
@@ -278,11 +282,12 @@ class Review:
     removed: list = field(default_factory=list)          # 回答で消えた段落（今の文章の行。変わったのではなく、なくなったもの）
     unknown_images: list = field(default_factory=list)   # 今の文書にない画像の番号（AI が作った [IMAGE n]）
     added_images: list = field(default_factory=list)     # 回答で増えた画像の行の番号（AI が行を写した）
+    footnotes: list = field(default_factory=list)        # 回答で増えた脚注の記号（[^1] など。字のまま組まれる）
 
     @property
     def clean(self):
         return not (self.older or self.newer or self.unknown_tokens or self.lost_tokens or self.lost_marks
-                    or self.unknown_images or self.added_images)
+                    or self.unknown_images or self.added_images or self.footnotes)
 
 
 def _marks(lines):
@@ -340,6 +345,10 @@ def review(content, doc_id, version, current_body, dictionary, images=()):
     for n, c in new_images.items():
         if c > old_images[n]:
             (r.added_images if old_images[n] or n in images else r.unknown_images).append(n)
+    # 脚注の記号：今の文章より増えたものだけを知らせる（利用者が自分で書いた [^1] を、取り込むたびに知らせないため）
+    old_notes = Counter(FOOTNOTE_RE.findall("\n".join(current_body)))
+    new_notes = Counter(FOOTNOTE_RE.findall(content.body_text))
+    r.footnotes = [m for m, c in new_notes.items() if c > old_notes[m]]
     new_marks = Counter(m for m, _ in _marks(content.body))
     new_lines = Counter(_marks(content.body))
     # 回答に同じ行がそのまま残っていれば、その行の記号は残ったとみなしてから、記号の数を比べる（どの行の記号が

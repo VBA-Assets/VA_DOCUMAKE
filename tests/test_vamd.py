@@ -104,6 +104,25 @@ def test_review_same_text_is_clean():
     assert r.clean and not r.changes
 
 
+def test_review_reports_footnotes_added_by_ai():
+    """AI が書いた脚注の記号（本文の [^1] と行頭の [^1]:）は、字のまま組まれるので知らせる。今の文章にもあるもの
+    （利用者が書いたもの）は、増えたときだけ知らせる（2026-10-30 班長決定）。"""
+    body = CURRENT[:3] + ["〔人名Ａ〕の主張は争う[^1]。"] + CURRENT[4:] + ["[^1]: 最判平成元年１月１日"]
+    r = vamd.review(answer(body), "K7Q29XMD", 3, CURRENT, make_dictionary())
+    assert r.footnotes == ["[^1]"] and not r.clean
+    current = CURRENT[:3] + ["〔人名Ａ〕の主張は争う[^注]。"] + CURRENT[4:]
+    assert vamd.review(answer(current), "K7Q29XMD", 3, current, make_dictionary()).clean
+    r = vamd.review(answer(current + ["[^注]: 出典", "〔法人Ａ〕[^b]"]), "K7Q29XMD", 3, current, make_dictionary())
+    assert r.footnotes == ["[^注]", "[^b]"]
+    # 均等割付の記号と、空白を含むものは脚注としない
+    r = vamd.review(answer(CURRENT + ["[原告]{5}", "[^ 1]"]), "K7Q29XMD", 3, CURRENT, make_dictionary())
+    assert r.footnotes == []
+
+
+def test_prompt_forbids_footnotes():
+    assert "脚注（[^1]）" in vamd.PROMPT
+
+
 def test_review_other_document_stops():
     with pytest.raises(vamd.OtherDocument):
         vamd.review(answer(CURRENT, doc_id="ZZZZZZZZ"), "K7Q29XMD", 3, CURRENT, make_dictionary())

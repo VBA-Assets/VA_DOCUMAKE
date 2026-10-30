@@ -15,7 +15,6 @@ from .pseudonym import TOKEN_RE
 
 
 PAGE_GAP = 12               # 確認表示のページの間（画素）
-CURRENT_PAGE_BORDER = 3             # 編集中のページを囲む線の太さ（画素）
 CARET_SIZE, CARET_MIN_SIZE = 5, 4   # 確認表示の印（▼）の幅の半分（ポイント×表示倍率。小さくしすぎない画素）
 PREVIEW_SCROLL_STEP = 20    # ホイール1目盛り＝3単位で送る画素
 
@@ -51,9 +50,8 @@ class PreviewMixin:
         self._layout_warning = warning
 
     def _fit_zoom(self):
-        """ページを欄の幅に合わせる倍率。"""
-        width = max(self.canvas.winfo_width(), 100)
-        return (width - 2 * PAGE_GAP - 8) / self._preview_doc[0].rect.width
+        """ページを欄の幅いっぱいに合わせる倍率。"""
+        return max(self.canvas.winfo_width(), 100) / self._preview_doc[0].rect.width
 
     def _layout_pages(self, keep=True):
         """全ページを縦に並べる（スクロールバー・ホイールでページをまたいで送れる）。
@@ -69,15 +67,19 @@ class PreviewMixin:
         width = max(self.canvas.winfo_width(), 100)
         self._page_size = (round(doc[0].rect.width * zoom), round(doc[0].rect.height * zoom))
         pw, ph = self._page_size
-        x = max((width - pw) // 2, PAGE_GAP)
-        self._page_x = x
-        self._page_tops = [PAGE_GAP + k * (ph + PAGE_GAP) for k in range(len(doc))]
+        self._page_x = 0
+        self._page_tops = [k * (ph + PAGE_GAP) for k in range(len(doc))]
         self._page_images = {}
         self._render_zoom = zoom
         self.canvas.delete("all")
-        for top in self._page_tops:
-            self.canvas.create_rectangle(x - 1, top - 1, x + pw, top + ph, outline=theme.BORDER, fill="white")
-        self.canvas.configure(scrollregion=(0, 0, max(x + pw + PAGE_GAP, width), self._total_height()))
+        # 用紙は欄の幅いっぱいなので、左右の線は引かず、ページとページの境目だけを線で示す（最初のページの上と
+        # 最後のページの下にも引かない。2026-10-31 班長指示）
+        for k, top in enumerate(self._page_tops):
+            self.canvas.create_rectangle(0, top, pw, top + ph, outline="", fill="white")
+            if k:
+                self.canvas.create_line(0, top - 1, pw, top - 1, fill=theme.BORDER)
+                self.canvas.create_line(0, top - PAGE_GAP, pw, top - PAGE_GAP, fill=theme.BORDER)
+        self.canvas.configure(scrollregion=(0, 0, max(pw, width), self._total_height()))
         self.canvas.yview_moveto(fraction)
         self._render_visible()
         self._show_caret(scroll=False)
@@ -123,7 +125,6 @@ class PreviewMixin:
         """カーソルの字の位置に、確認表示で印を付ける。scroll なら、見えていないときにそのページへ送る。"""
         self._caret_job = None
         self.canvas.delete("caret")
-        self.canvas.delete("current_page")
         m = self.session.layout_map
         pos = self._cursor_real()
         if m is None or pos is None or not self._page_tops:
@@ -135,13 +136,7 @@ class PreviewMixin:
         if page >= len(self._page_tops):
             return
         z = self._render_zoom
-        # 編集中のページ（カーソルのあるページ）を太線で囲む（2026-10-23 班長指示）。線はページの外側に引き、
-        # ページの字にかからないようにする
-        pw, ph = self._page_size
-        px, pt, b = self._page_x, self._page_tops[page], CURRENT_PAGE_BORDER
-        self.canvas.create_rectangle(px - b / 2 - 1, pt - b / 2 - 1, px + pw + b / 2, pt + ph + b / 2,
-                                     outline=theme.ACCENT, width=b, tags="current_page")
-        cx = self._page_x + x * z
+        cx =self._page_x + x * z
         cy = self._page_tops[page] + top * z
         # 印は、入力カーソルと同じ位置（字と字の間）の上の ▼（縦棒だと、確認表示に入力できるように見えるため。
         # 2026-10-23 班長決定）
@@ -207,7 +202,6 @@ class PreviewMixin:
             self._page_images[k] = tk.PhotoImage(data=pix.tobytes("png"))
             self.canvas.create_image(self._page_x, y, image=self._page_images[k], anchor="nw")
             self.canvas.tag_raise("caret")
-            self.canvas.tag_raise("current_page")
         # 表示中のページ：確認表示の真ん中にあるページ（一番上・一番下まで送ったときは、最初・最後のページ）
         if self.canvas.yview()[0] <= 0:
             self._preview_page = 0
@@ -219,7 +213,7 @@ class PreviewMixin:
 
     def _total_height(self):
         """確認表示の全ページを並べた高さ（画素）。"""
-        return self._page_tops[-1] + self._page_size[1] + PAGE_GAP
+        return self._page_tops[-1] + self._page_size[1]
 
     def _page_at(self, y):
         """canvas の高さ y にあるページ（0 から）。"""
